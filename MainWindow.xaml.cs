@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -12,6 +13,7 @@ using System.Windows.Shell;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using MultronUpdater.Services;
+using MultronUpdater.Views;
 
 namespace MultronUpdater
 {
@@ -24,16 +26,22 @@ namespace MultronUpdater
         private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(15) };
         private readonly DispatcherTimer _autoSave = new() { Interval = TimeSpan.FromMilliseconds(700) };
         private readonly DispatcherTimer _savedFade = new() { Interval = TimeSpan.FromSeconds(3) };
+        private readonly ObservableCollection<FileGroupVm> _groups = new();
+        private UpdateProfile? _current;
         private bool _loading;
+        private FileItem? _dragItem;
+        private Point _dragStart;
+        private bool _dragging;
+        private FileGroupVm? _dropGroup;
         private bool _trayHintShown;
 
         private static App AppInstance => App.Current;
+        private static AppSettings Settings => App.Current.Settings;
 
         public MainWindow()
         {
             InitializeComponent();
 
-            // --- logs ---
             foreach (var entry in Logger.ReadRecent(500)) _logs.Add(entry);
             _logView = CollectionViewSource.GetDefaultView(_logs);
             _logView.Filter = FilterLog;
@@ -41,9 +49,16 @@ namespace MultronUpdater
             Logger.EntryAdded += e => Dispatcher.BeginInvoke(() => AddLog(e));
             Loaded += (_, _) => ScrollLogToEnd();
 
-            // --- state ---
-            LoadForm(AppInstance.Settings);
+            GroupsList.ItemsSource = _groups;
+            SourceInitialized += (_, _) => FileDropHelper.Enable(this, OnExplorerDrop);
+            PreviewMouseMove += Window_PreviewMouseMove;
+            PreviewMouseLeftButtonUp += Window_PreviewMouseLeftButtonUp;
+
+            LoadGeneral();
+            ProfileList.ItemsSource = Settings.Profiles;
+            ProfileList.SelectedIndex = 0;
             HookAutoSave();
+
             AppInstance.ProgressChanged += OnProgress;
             AppInstance.StateChanged += RefreshState;
             _clock.Tick += (_, _) => RefreshState();
@@ -51,15 +66,12 @@ namespace MultronUpdater
             RefreshState();
         }
 
-        // ================================================================ settings form
-
-        /// <summary>Every change in the form is saved automatically (shortly after typing stops).</summary>
         private void HookAutoSave()
         {
-            foreach (var box in new[] { OwnerBox, RepoBox, BranchBox, RepoPathBox, FolderBox, ExeBox, IntervalBox })
+            foreach (var box in new[] { NameBox, OwnerBox, RepoBox, BranchBox, RepoPathBox, FolderBox, ExeBox, IntervalBox })
                 box.TextChanged += (_, _) => ScheduleAutoSave();
             TokenBox.PasswordChanged += (_, _) => ScheduleAutoSave();
-            foreach (var check in new[] { RestartCheck, BackupCheck, NotifyCheck, MinimizedCheck, StartupCheck })
+            foreach (var check in new[] { EnabledCheck, RestartCheck, EdgeCheck, BackupCheck, OnlyFilesCheck, NotifyCheck, MinimizedCheck, StartupCheck })
                 check.Click += (_, _) => ScheduleAutoSave();
 
             _autoSave.Tick += (_, _) => { _autoSave.Stop(); SaveForm(showConfirmation: false, silent: true); };
@@ -73,7 +85,6 @@ namespace MultronUpdater
             _autoSave.Start();
         }
 
-        /// <summary>Saves immediately if an automatic save is still pending.</summary>
         private void FlushAutoSave()
         {
             if (!_autoSave.IsEnabled) return;
@@ -81,40 +92,74 @@ namespace MultronUpdater
             SaveForm(showConfirmation: false, silent: true);
         }
 
-        private void LoadForm(AppSettings s)
+        private void LoadGeneral()
         {
             _loading = true;
-            try { FillForm(s); }
+            try
+            {
+                var s = Settings;
+                AutoToggle.IsChecked = s.AutoUpdateEnabled;
+                IntervalBox.Text = s.CheckIntervalMinutes.ToString();
+                NotifyCheck.IsChecked = s.NotifyOnUpdate;
+                MinimizedCheck.IsChecked = s.StartMinimized;
+                try { StartupCheck.IsChecked = StartupHelper.IsEnabled(); }
+                catch { StartupCheck.IsChecked = s.StartWithWindows; }
+            }
             finally { _loading = false; }
         }
 
-        private void FillForm(AppSettings s)
+        private void LoadProfile(UpdateProfile? p)
         {
-            OwnerBox.Text = s.Owner;
-            RepoBox.Text = s.Repo;
-            BranchBox.Text = s.Branch;
-            RepoPathBox.Text = s.RepoPath;
-            TokenBox.Password = s.GetToken();
-            FolderBox.Text = s.LocalFolder;
-            ExeBox.Text = s.ExeName;
-            RestartCheck.IsChecked = s.RestartAfterUpdate;
-            BackupCheck.IsChecked = s.KeepBackup;
-            AutoToggle.IsChecked = s.AutoUpdateEnabled;
-            IntervalBox.Text = s.CheckIntervalMinutes.ToString();
-            NotifyCheck.IsChecked = s.NotifyOnUpdate;
-            MinimizedCheck.IsChecked = s.StartMinimized;
-            try { StartupCheck.IsChecked = StartupHelper.IsEnabled(); }
-            catch { StartupCheck.IsChecked = s.StartWithWindows; }
-
-            if (!string.IsNullOrWhiteSpace(s.Owner) && !string.IsNullOrWhiteSpace(s.Repo))
-                UrlBox.Text = $"https://github.com/{s.Owner}/{s.Repo}/tree/{s.Branch}/{s.RepoPath}".TrimEnd('/');
+            _loading = true;
+            try
+            {
+                Editor.IsEnabled = p != null;
+                p ??= new UpdateProfile { Name = "" };
+                NameBox.Text = p.Name;
+                EnabledCheck.IsChecked = p.Enabled;
+                OwnerBox.Text = p.Owner;
+                RepoBox.Text = p.Repo;
+                BranchBox.Text = p.Branch;
+                RepoPathBox.Text = p.RepoPath;
+                TokenBox.Password = p.GetToken();
+                FolderBox.Text = p.LocalFolder;
+                ExeBox.Text = p.ExeName;
+                RestartCheck.IsChecked = p.RestartAfterUpdate;
+                EdgeCheck.IsChecked = p.RefreshEdgeAfterUpdate;
+                BackupCheck.IsChecked = p.KeepBackup;
+                OnlyFilesCheck.IsChecked = p.OnlySelectedFiles;
+                _groups.Clear();
+                foreach (var g in p.Groups) AddGroupVm(new FileGroupVm(g));
+                FileFilterBox.Text = "";
+                UpdateFilesSummary(null);
+                UrlBox.Text = !string.IsNullOrWhiteSpace(p.Owner) && !string.IsNullOrWhiteSpace(p.Repo)
+                    ? $"https://github.com/{p.Owner}/{p.Repo}/tree/{p.Branch}/{p.RepoPath}".TrimEnd('/')
+                    : "";
+            }
+            finally { _loading = false; }
         }
 
-        /// <summary>
-        /// Validates the form and copies it into the settings. Returns false (and shows why) when invalid.
-        /// In silent mode (auto-save) an invalid interval just keeps the previous value.
-        /// </summary>
-        private bool ReadForm(AppSettings s, bool silent = false)
+        private void ReadProfile(UpdateProfile p)
+        {
+            p.Name = NameBox.Text.Trim();
+            p.Enabled = EnabledCheck.IsChecked == true;
+            p.Owner = OwnerBox.Text.Trim();
+            p.Repo = RepoBox.Text.Trim();
+            if (p.Repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) p.Repo = p.Repo[..^4];
+            p.Branch = string.IsNullOrWhiteSpace(BranchBox.Text) ? "main" : BranchBox.Text.Trim();
+            p.RepoPath = RepoPathBox.Text.Trim().Replace('\\', '/').Trim('/');
+            p.SetToken(TokenBox.Password);
+            p.LocalFolder = FolderBox.Text.Trim();
+            p.ExeName = ExeBox.Text.Trim();
+            p.RestartAfterUpdate = RestartCheck.IsChecked == true;
+            p.RefreshEdgeAfterUpdate = EdgeCheck.IsChecked == true;
+            p.KeepBackup = BackupCheck.IsChecked == true;
+            p.OnlySelectedFiles = OnlyFilesCheck.IsChecked == true;
+            p.Groups = _groups.Select(g => g.ToModel()).ToList();
+            p.NotifyDisplayChanged();
+        }
+
+        private bool ReadGeneral(AppSettings s, bool silent)
         {
             if (!int.TryParse(IntervalBox.Text.Trim(), out var minutes) || minutes < 1 || minutes > 1440)
             {
@@ -122,41 +167,35 @@ namespace MultronUpdater
                     minutes = s.CheckIntervalMinutes;
                 else
                 {
+                    Tabs.SelectedIndex = 1;
                     ShowWarning("The check interval must be a whole number between 1 and 1440 minutes.");
                     IntervalBox.Focus();
                     return false;
                 }
             }
-
-            s.Owner = OwnerBox.Text.Trim();
-            s.Repo = RepoBox.Text.Trim();
-            if (s.Repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) s.Repo = s.Repo[..^4];
-            s.Branch = string.IsNullOrWhiteSpace(BranchBox.Text) ? "main" : BranchBox.Text.Trim();
-            s.RepoPath = RepoPathBox.Text.Trim().Replace('\\', '/').Trim('/');
-            s.SetToken(TokenBox.Password);
-            s.LocalFolder = FolderBox.Text.Trim();
-            s.ExeName = ExeBox.Text.Trim();
-            s.RestartAfterUpdate = RestartCheck.IsChecked == true;
-            s.KeepBackup = BackupCheck.IsChecked == true;
             s.CheckIntervalMinutes = minutes;
+            s.AutoUpdateEnabled = AutoToggle.IsChecked == true;
             s.NotifyOnUpdate = NotifyCheck.IsChecked == true;
             s.StartMinimized = MinimizedCheck.IsChecked == true;
             s.StartWithWindows = StartupCheck.IsChecked == true;
             return true;
         }
 
+        private static string TimerSignature(AppSettings s) =>
+            $"{s.AutoUpdateEnabled}|{s.CheckIntervalMinutes}|" +
+            string.Join(";", s.Profiles.Where(p => p.Enabled && p.IsConfigured(out _)).Select(p => p.SourceKey));
+
         private bool SaveForm(bool showConfirmation, bool silent = false)
         {
-            var s = AppInstance.Settings;
-            // What the background timer depends on, to restart it only when needed
-            var before = (s.SourceKey, s.CheckIntervalMinutes, Configured: s.IsConfigured(out _), s.AutoUpdateEnabled);
+            var s = Settings;
+            var before = TimerSignature(s);
 
-            if (!ReadForm(s, silent)) return false;
-            s.AutoUpdateEnabled = AutoToggle.IsChecked == true;
+            if (!ReadGeneral(s, silent)) return false;
+            if (_current != null) ReadProfile(_current);
 
-            if (!silent && !string.IsNullOrEmpty(s.ExeName) && !string.IsNullOrEmpty(s.LocalFolder) &&
-                !File.Exists(Path.Combine(s.LocalFolder, s.ExeName)))
-                Logger.Warn($"{s.ExeName} does not exist in the target folder yet; it will be downloaded on the first update.");
+            if (!silent && _current != null && !string.IsNullOrEmpty(_current.ExeName) && !string.IsNullOrEmpty(_current.LocalFolder) &&
+                !File.Exists(Path.Combine(_current.LocalFolder, _current.ExeName)))
+                Logger.Warn($"[{_current.DisplayName}] {_current.ExeName} does not exist in the target folder yet; it will be downloaded on the first update.");
 
             try { s.Save(); }
             catch (Exception ex)
@@ -180,10 +219,10 @@ namespace MultronUpdater
                 if (!silent) ShowWarning(ex.Message);
             }
 
-            var after = (s.SourceKey, s.CheckIntervalMinutes, Configured: s.IsConfigured(out _), s.AutoUpdateEnabled);
+            var after = TimerSignature(s);
             if (!silent) Logger.Info("Settings saved.");
             if (!silent || before != after)
-                AppInstance.ApplyAutoUpdate(checkSoon: s.AutoUpdateEnabled && (!silent || before.SourceKey != after.SourceKey || !before.Configured));
+                AppInstance.ApplyAutoUpdate(checkSoon: s.AutoUpdateEnabled && before != after);
 
             SavedText.Text = "✓ Saved";
             _savedFade.Stop();
@@ -191,13 +230,75 @@ namespace MultronUpdater
 
             if (showConfirmation)
             {
-                if (s.IsConfigured(out var err)) SetStatus("Settings saved", null);
-                else SetStatus("Settings saved, but incomplete", err);
+                if (_current == null || _current.IsConfigured(out var err)) SetStatus("Settings saved", null);
+                else SetStatus($"Settings saved, but \"{_current.DisplayName}\" is incomplete", err);
             }
             return true;
         }
 
-        // ================================================================ buttons
+        private void ProfileList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var selected = ProfileList.SelectedItem as UpdateProfile;
+            if (ReferenceEquals(selected, _current)) return;
+            FlushAutoSave();
+            _current = selected;
+            LoadProfile(_current);
+            RefreshState();
+        }
+
+        private void SelectProfile(UpdateProfile p)
+        {
+            ProfileList.Items.Refresh();
+            ProfileList.SelectedItem = p;
+            ProfileList.ScrollIntoView(p);
+        }
+
+        private void AddProfile_Click(object sender, RoutedEventArgs e)
+        {
+            FlushAutoSave();
+            var p = new UpdateProfile { Name = $"Target {Settings.Profiles.Count + 1}" };
+            Settings.Profiles.Add(p);
+            AppInstance.SaveSettings();
+            Logger.Info($"Target \"{p.DisplayName}\" added.");
+            SelectProfile(p);
+            Tabs.SelectedIndex = 0;
+            NameBox.Focus();
+            NameBox.SelectAll();
+        }
+
+        private void DuplicateProfile_Click(object sender, RoutedEventArgs e)
+        {
+            if (_current == null) return;
+            FlushAutoSave();
+            var copy = _current.Duplicate();
+            Settings.Profiles.Insert(Settings.Profiles.IndexOf(_current) + 1, copy);
+            AppInstance.SaveSettings();
+            Logger.Info($"Target \"{copy.DisplayName}\" added (copy).");
+            SelectProfile(copy);
+        }
+
+        private void RemoveProfile_Click(object sender, RoutedEventArgs e)
+        {
+            if (_current == null) return;
+            if (Settings.Profiles.Count <= 1)
+            {
+                ShowWarning("At least one target is needed. Change its settings or turn off \"Enabled\" instead.");
+                return;
+            }
+            if (MessageBox.Show(this, $"Remove the target \"{_current.DisplayName}\"?\n\nFiles on this computer are not deleted.",
+                    "Remove target", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+
+            _autoSave.Stop();
+            var index = Settings.Profiles.IndexOf(_current);
+            var removed = _current;
+            Settings.Profiles.Remove(removed);
+            _current = null;
+            AppInstance.SaveSettings();
+            AppInstance.ApplyAutoUpdate(checkSoon: false);
+            Logger.Info($"Target \"{removed.DisplayName}\" removed.");
+            SelectProfile(Settings.Profiles[Math.Min(index, Settings.Profiles.Count - 1)]);
+        }
 
         private void SaveButton_Click(object sender, RoutedEventArgs e)
         {
@@ -205,26 +306,42 @@ namespace MultronUpdater
             SaveForm(showConfirmation: true);
         }
 
-        private async void CheckButton_Click(object sender, RoutedEventArgs e)
+        private async void CheckAllButton_Click(object sender, RoutedEventArgs e)
         {
             _autoSave.Stop();
             if (!SaveForm(showConfirmation: false)) return;
-            if (!AppInstance.Settings.IsConfigured(out var err)) { ShowWarning(err); return; }
-            await AppInstance.RunCheckAsync(force: false, manual: true);
+            if (!Settings.HasConfiguredProfile())
+            {
+                ShowWarning("There is no enabled, fully configured target yet.");
+                return;
+            }
+            await AppInstance.RunCheckAsync(null, force: false, manual: true);
+        }
+
+        private async void CheckButton_Click(object sender, RoutedEventArgs e)
+        {
+            _autoSave.Stop();
+            if (_current == null || !SaveForm(showConfirmation: false)) return;
+            if (!_current.IsConfigured(out var err)) { ShowWarning(err); return; }
+            await AppInstance.RunCheckAsync(_current.Id, force: false, manual: true);
         }
 
         private async void ForceButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!SaveForm(showConfirmation: false)) return;
-            var s = AppInstance.Settings;
-            if (!s.IsConfigured(out var err)) { ShowWarning(err); return; }
+            _autoSave.Stop();
+            if (_current == null || !SaveForm(showConfirmation: false)) return;
+            if (!_current.IsConfigured(out var err)) { ShowWarning(err); return; }
 
-            var exe = string.IsNullOrEmpty(s.ExeName) ? "the program" : s.ExeName;
-            if (MessageBox.Show(this,
-                    $"All files will be downloaded again from GitHub, {exe} will be closed, the files replaced and {exe} started again.\n\nContinue?",
+            var steps = new List<string> { "all files will be downloaded again from GitHub" };
+            if (!string.IsNullOrEmpty(_current.ExeName)) steps.Add($"{_current.ExeName} will be closed");
+            steps.Add("the files will be replaced");
+            if (!string.IsNullOrEmpty(_current.ExeName) && _current.RestartAfterUpdate) steps.Add($"{_current.ExeName} will be started again");
+            if (_current.RefreshEdgeAfterUpdate) steps.Add("the active Edge tab will be refreshed");
+
+            if (MessageBox.Show(this, $"Force update \"{_current.DisplayName}\":\n\n• " + string.Join("\n• ", steps) + "\n\nContinue?",
                     "Force update", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return;
-            await AppInstance.RunCheckAsync(force: true, manual: true);
+            await AppInstance.RunCheckAsync(_current.Id, force: true, manual: true);
         }
 
         private void AutoToggle_Click(object sender, RoutedEventArgs e)
@@ -232,13 +349,13 @@ namespace MultronUpdater
             bool on = AutoToggle.IsChecked == true;
             if (on)
             {
-                // Turning on: save the whole form first, so the background check uses the current values
-                var s = AppInstance.Settings;
-                if (!ReadForm(s)) { AutoToggle.IsChecked = false; return; }
-                if (!s.IsConfigured(out var err))
+                FlushAutoSave();
+                if (_current != null) ReadProfile(_current);
+                if (!Settings.HasConfiguredProfile())
                 {
                     AutoToggle.IsChecked = false;
-                    ShowWarning("Fill in the settings before turning on automatic updates:\n" + err);
+                    Tabs.SelectedIndex = 0;
+                    ShowWarning("Fill in at least one target (GitHub source and target folder) before turning on automatic updates.");
                     return;
                 }
             }
@@ -264,7 +381,9 @@ namespace MultronUpdater
             if (path != null) RepoPathBox.Text = path;
             if (path != null && path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(ExeBox.Text))
                 ExeBox.Text = Path.GetFileName(path);
-            SetStatus("Fields filled from the link", "Check them and click Save settings.");
+            if (string.IsNullOrWhiteSpace(NameBox.Text) || NameBox.Text.StartsWith("Target ") || NameBox.Text == "My program")
+                NameBox.Text = repo;
+            SetStatus("Fields filled from the link", "Check them; changes are saved automatically.");
         }
 
         private void BrowseFolder_Click(object sender, RoutedEventArgs e)
@@ -278,7 +397,7 @@ namespace MultronUpdater
         {
             var dlg = new OpenFileDialog
             {
-                Title = "Select the program to close and restart",
+                Title = "Select the program to close while updating",
                 Filter = "Programs (*.exe)|*.exe|All files (*.*)|*.*"
             };
             if (Directory.Exists(FolderBox.Text)) dlg.InitialDirectory = FolderBox.Text;
@@ -303,36 +422,338 @@ namespace MultronUpdater
             else ShowWarning("The target folder does not exist yet.");
         }
 
-        // ================================================================ progress / status
+        private void AddGroupVm(FileGroupVm vm)
+        {
+            vm.Changed += () => { ScheduleAutoSave(); UpdateFilesSummary(null); };
+            _groups.Add(vm);
+        }
+
+        private FileGroupVm CreateGroup(string name)
+        {
+            var vm = new FileGroupVm(new FileGroup { Name = name, RestartProgram = !string.IsNullOrWhiteSpace(ExeBox.Text) });
+            AddGroupVm(vm);
+            ScheduleAutoSave();
+            return vm;
+        }
+
+        private IEnumerable<FileItem> AllFileItems() => _groups.SelectMany(g => g.Files);
+
+        private void UpdateFilesSummary(string? extra)
+        {
+            int total = AllFileItems().Count();
+            int on = _groups.Where(g => g.Enabled).SelectMany(g => g.Files).Count(f => f.Include);
+            var text = total == 0
+                ? "No files yet. Click \"Load from GitHub\", \"Add files...\" or drag files below."
+                : $"{on} of {total} file(s) will be updated, in {_groups.Count} group(s).";
+            FilesSummary.Text = extra == null ? text : $"{text}  {extra}";
+        }
+
+        private void NewGroup_Click(object sender, RoutedEventArgs e)
+        {
+            var vm = CreateGroup($"Group {_groups.Count + 1}");
+            OnlyFilesCheck.IsChecked = true;
+            ScheduleAutoSave();
+            UpdateFilesSummary(null);
+            GroupsList.UpdateLayout();
+            if (GroupsList.ItemContainerGenerator.ContainerFromItem(vm) is FrameworkElement fe) fe.BringIntoView();
+        }
+
+        private void RemoveGroup_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not FileGroupVm vm) return;
+            if (vm.Files.Count > 0 && MessageBox.Show(this,
+                    $"Delete the group \"{vm.Name}\" and remove its {vm.Files.Count} file(s) from the list?\n\nFiles on this computer are not deleted.",
+                    "Delete group", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+            _groups.Remove(vm);
+            ScheduleAutoSave();
+            UpdateFilesSummary(null);
+        }
+
+        private void FileFilter_Changed(object sender, TextChangedEventArgs e)
+        {
+            var q = FileFilterBox.Text.Trim();
+            foreach (var f in AllFileItems())
+                f.IsVisible = q.Length == 0 || f.Path.Contains(q, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void AddFiles_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFileDialog { Title = "Select the files to keep updated", Multiselect = true, Filter = "All files (*.*)|*.*" };
+            if (Directory.Exists(FolderBox.Text)) dlg.InitialDirectory = FolderBox.Text;
+            if (dlg.ShowDialog(this) == true) AddLocalPaths(dlg.FileNames, null);
+        }
+
+        private void OnExplorerDrop(IReadOnlyList<string> paths, Point point)
+        {
+            if (_current == null || paths.Count == 0) return;
+            if (Tabs.SelectedIndex != 0) Tabs.SelectedIndex = 0;
+            AddLocalPaths(paths, GroupAt(point));
+        }
+
+        private FileGroupVm? GroupAt(Point windowPoint)
+        {
+            var hit = InputHitTest(windowPoint) as DependencyObject;
+            while (hit != null)
+            {
+                if (hit is FrameworkElement { Tag: FileGroupVm g } fe && fe.Name == "groupBorder") return g;
+                hit = hit is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(hit) : LogicalTreeHelper.GetParent(hit);
+            }
+            return null;
+        }
+
+        private void AddLocalPaths(IEnumerable<string> paths, FileGroupVm? target)
+        {
+            var list = paths.ToList();
+            var root = FolderBox.Text.Trim();
+            if (root.Length == 0)
+            {
+                var first = list[0];
+                root = Directory.Exists(first) && list.Count == 1 ? first : Path.GetDirectoryName(first)!;
+                FolderBox.Text = root;
+                Logger.Info($"[{_current?.DisplayName}] Target folder set to {root} from the dropped files.");
+            }
+            var rootFull = Path.GetFullPath(root).TrimEnd('\\') + "\\";
+
+            var files = new List<string>();
+            foreach (var p in list)
+            {
+                if (File.Exists(p)) files.Add(p);
+                else if (Directory.Exists(p))
+                {
+                    try { files.AddRange(Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories).Take(5000)); }
+                    catch (Exception ex) { Logger.Warn("Could not read folder " + p + ": " + ex.Message); }
+                }
+            }
+
+            bool moveExisting = target != null;
+            target ??= _groups.FirstOrDefault() ?? CreateGroup("Files");
+            var existing = AllFileItems().ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
+            int added = 0, rechecked = 0, moved = 0, outside = 0;
+            foreach (var file in files)
+            {
+                var full = Path.GetFullPath(file);
+                if (!full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase)) { outside++; continue; }
+                var rel = full[rootFull.Length..].Replace('\\', '/');
+                if (existing.TryGetValue(rel, out var item))
+                {
+                    if (moveExisting && !target.Files.Contains(item))
+                    {
+                        _groups.FirstOrDefault(g => g.Files.Contains(item))?.Remove(item);
+                        target.Add(item);
+                        moved++;
+                    }
+                    if (!item.Include) { item.Include = true; rechecked++; }
+                    continue;
+                }
+                var fi = new FileItem(rel, true);
+                target.Add(fi);
+                existing[rel] = fi;
+                added++;
+            }
+            target.Sort();
+            target.IsExpanded = true;
+            OnlyFilesCheck.IsChecked = true;
+            FileFilter_Changed(FileFilterBox, null!);
+            ScheduleAutoSave();
+
+            var parts = new List<string>();
+            if (added > 0) parts.Add($"added {added} file(s) to \"{target.Name}\"");
+            if (moved > 0) parts.Add($"moved {moved} file(s) to \"{target.Name}\"");
+            if (rechecked > 0) parts.Add($"checked {rechecked} file(s) already in the list");
+            if (parts.Count == 0) parts.Add("all dropped files were already in the list");
+            var msg = char.ToUpper(parts[0][0]) + string.Join(", ", parts)[1..] + ".";
+            if (outside > 0) msg += $" {outside} file(s) skipped because they are not inside the target folder.";
+            Logger.Info($"[{_current?.DisplayName}] {msg}");
+            UpdateFilesSummary(msg);
+            if (outside > 0 && added == 0 && rechecked == 0 && moved == 0)
+                ShowWarning($"The dropped files are not inside the target folder:\n{root}\n\nChange the target folder first, or drop files from inside it.");
+        }
+
+        private async void LoadFiles_Click(object sender, RoutedEventArgs e)
+        {
+            if (_current == null) return;
+            _autoSave.Stop();
+            if (!SaveForm(showConfirmation: false)) return;
+            if (!_current.IsConfigured(out var err)) { ShowWarning(err); return; }
+
+            LoadFilesButton.IsEnabled = false;
+            UpdateFilesSummary("Loading the file list from GitHub...");
+            var profile = _current;
+            try
+            {
+                var snapshot = profile.Clone();
+                var statuses = await System.Threading.Tasks.Task.Run(() => AppInstance.Updater.GetFileStatusAsync(snapshot));
+                if (!ReferenceEquals(profile, _current)) return;
+
+                var existing = AllFileItems().ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
+                bool wasEmpty = existing.Count == 0;
+                FileGroupVm? newGroup = wasEmpty ? (_groups.FirstOrDefault() ?? CreateGroup("Files")) : null;
+                int added = 0;
+                foreach (var st in statuses)
+                {
+                    if (existing.TryGetValue(st.RelativePath, out var item)) { item.State = st.State; continue; }
+                    if (st.State == FileState.NotOnGitHub) continue;
+                    newGroup ??= _groups.FirstOrDefault(g => g.Name == "Other files on GitHub") ?? CreateGroup("Other files on GitHub");
+                    var fi = new FileItem(st.RelativePath, wasEmpty, st.State);
+                    newGroup.Add(fi);
+                    existing[fi.Path] = fi;
+                    added++;
+                }
+                foreach (var g in _groups) g.Sort();
+                if (added > 0) OnlyFilesCheck.IsChecked = true;
+                FileFilter_Changed(FileFilterBox, null!);
+                ScheduleAutoSave();
+
+                int changed = statuses.Count(s => s.State == FileState.Changed);
+                int fresh = statuses.Count(s => s.State == FileState.New);
+                int same = statuses.Count(s => s.State == FileState.UpToDate);
+                int missing = statuses.Count(s => s.State == FileState.NotOnGitHub);
+                var summary = $"GitHub: {changed} changed, {fresh} new, {same} up to date" + (missing > 0 ? $", {missing} not found" : "") +
+                              (added > 0 ? $" · {added} file(s) added to the list" + (wasEmpty ? "" : " (unchecked, in \"Other files on GitHub\")") : "") + ".";
+                Logger.Info($"[{profile.DisplayName}] {summary}");
+                UpdateFilesSummary(summary);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[{profile.DisplayName}] Could not load the file list: {ex.Message}");
+                UpdateFilesSummary("Could not load the file list: " + ex.Message);
+            }
+            finally { LoadFilesButton.IsEnabled = true; }
+        }
+
+        private void FileRow_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not FileItem item) return;
+            _dragItem = item;
+            _dragStart = e.GetPosition(this);
+            _dragging = false;
+        }
+
+        private void Window_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (_dragItem == null) return;
+            if (e.LeftButton != System.Windows.Input.MouseButtonState.Pressed) { EndDrag(); return; }
+
+            var pos = e.GetPosition(this);
+            if (!_dragging)
+            {
+                if (Math.Abs(pos.X - _dragStart.X) < 6 && Math.Abs(pos.Y - _dragStart.Y) < 6) return;
+                _dragging = true;
+                System.Windows.Input.Mouse.Capture(this);
+                System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Hand;
+                SetStatus($"Moving \"{_dragItem.Name}\"", "Release it over the group it should belong to.");
+            }
+
+            var group = GroupAt(pos);
+            if (!ReferenceEquals(group, _dropGroup))
+            {
+                if (_dropGroup != null) _dropGroup.IsDropTarget = false;
+                _dropGroup = group;
+                if (_dropGroup != null) _dropGroup.IsDropTarget = true;
+            }
+        }
+
+        private void Window_PreviewMouseLeftButtonUp(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (_dragItem == null) return;
+            if (_dragging)
+            {
+                var target = GroupAt(e.GetPosition(this));
+                if (target != null) MoveFileToGroup(_dragItem, target);
+                e.Handled = true;
+            }
+            EndDrag();
+        }
+
+        private void EndDrag()
+        {
+            if (_dragging)
+            {
+                System.Windows.Input.Mouse.Capture(null);
+                System.Windows.Input.Mouse.OverrideCursor = null;
+                SetStatus("Ready", null);
+            }
+            if (_dropGroup != null) _dropGroup.IsDropTarget = false;
+            _dropGroup = null;
+            _dragItem = null;
+            _dragging = false;
+        }
+
+        private void MoveFileToGroup(FileItem item, FileGroupVm target)
+        {
+            var source = _groups.FirstOrDefault(g => g.Files.Contains(item));
+            if (source == null || ReferenceEquals(source, target)) return;
+            source.Remove(item);
+            target.Add(item);
+            target.Sort();
+            target.IsExpanded = true;
+            ScheduleAutoSave();
+            UpdateFilesSummary($"Moved {item.Name} to \"{target.Name}\".");
+        }
+
+        private void FileRow_RightClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not FileItem item) return;
+            var source = _groups.FirstOrDefault(g => g.Files.Contains(item));
+            var menu = new ContextMenu();
+
+            var move = new MenuItem { Header = "Move to group" };
+            foreach (var g in _groups.Where(g => !ReferenceEquals(g, source)))
+            {
+                var target = g;
+                var mi = new MenuItem { Header = g.Name };
+                mi.Click += (_, _) => MoveFileToGroup(item, target);
+                move.Items.Add(mi);
+            }
+            if (move.Items.Count > 0) move.Items.Add(new Separator());
+            var newGroup = new MenuItem { Header = "New group" };
+            newGroup.Click += (_, _) => MoveFileToGroup(item, CreateGroup($"Group {_groups.Count + 1}"));
+            move.Items.Add(newGroup);
+            menu.Items.Add(move);
+
+            var openFolder = new MenuItem { Header = "Show in File Explorer" };
+            openFolder.Click += (_, _) =>
+            {
+                var full = Path.Combine(FolderBox.Text, item.Path.Replace('/', '\\'));
+                if (File.Exists(full)) Process.Start("explorer.exe", $"/select,\"{full}\"");
+                else ShowWarning("This file is not on this computer yet.");
+            };
+            menu.Items.Add(openFolder);
+
+            var remove = new MenuItem { Header = "Remove from list" };
+            remove.Click += (_, _) =>
+            {
+                source?.Remove(item);
+                ScheduleAutoSave();
+                UpdateFilesSummary(null);
+            };
+            menu.Items.Add(remove);
+
+            menu.PlacementTarget = (UIElement)sender;
+            menu.IsOpen = true;
+            e.Handled = true;
+        }
 
         private void OnProgress(UpdateProgress p)
         {
-            bool busy = p.Stage is not (UpdateStage.Completed or UpdateStage.Failed);
-            BusyBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
-            CheckButton.IsEnabled = ForceButton.IsEnabled = !busy;
-
             if (p.Stage == UpdateStage.Downloading && p.BytesTotal > 0)
             {
                 var pct = p.BytesDone * 100 / p.BytesTotal;
-                SetStatus($"Downloading update... {pct}%",
+                SetStatus($"{p.ProfileName}: downloading update... {pct}%",
                     $"{p.CurrentFile}  ·  {UpdateService.FormatSize(p.BytesDone)} of {UpdateService.FormatSize(p.BytesTotal)}");
                 Taskbar.ProgressState = TaskbarItemProgressState.Normal;
                 Taskbar.ProgressValue = pct / 100.0;
             }
             else
             {
-                SetStatus(p.Message, p.Stage == UpdateStage.Failed ? "See the Logs tab for details." : null);
-                Taskbar.ProgressState = p.Stage switch
-                {
-                    UpdateStage.Checking => TaskbarItemProgressState.None,
-                    UpdateStage.Failed => TaskbarItemProgressState.None,
-                    UpdateStage.Completed => TaskbarItemProgressState.None,
-                    _ => TaskbarItemProgressState.Indeterminate
-                };
+                SetStatus($"{p.ProfileName}: {p.Message}", p.Stage == UpdateStage.Failed ? "See the Logs tab for details." : null);
+                Taskbar.ProgressState = p.Stage is UpdateStage.Checking or UpdateStage.Failed or UpdateStage.Completed
+                    ? TaskbarItemProgressState.None
+                    : TaskbarItemProgressState.Indeterminate;
             }
-            StatusText.Foreground = p.Stage == UpdateStage.Failed
-                ? new SolidColorBrush(Color.FromRgb(0xCF, 0x22, 0x2E))
-                : (Brush)FindResource("TextBrush");
+            if (p.Stage == UpdateStage.Failed)
+                StatusText.Foreground = new SolidColorBrush(Color.FromRgb(0xCF, 0x22, 0x2E));
         }
 
         private void SetStatus(string text, string? detail)
@@ -344,17 +765,18 @@ namespace MultronUpdater
 
         private string BuildDetail()
         {
-            var s = AppInstance.Settings;
-            var parts = new System.Collections.Generic.List<string>();
+            var parts = new List<string>();
+            var enabled = Settings.Profiles.Count(p => p.Enabled);
+            parts.Add($"{enabled} of {Settings.Profiles.Count} target(s) enabled");
             if (AppInstance.LastCheck is { } lc) parts.Add($"Last check {lc:HH:mm:ss}");
-            if (!string.IsNullOrEmpty(s.LastCommitSha)) parts.Add($"GitHub commit {s.LastCommitSha[..Math.Min(7, s.LastCommitSha.Length)]}");
-            if (s.LastUpdateTime is { } lu) parts.Add($"Last update {lu:yyyy-MM-dd HH:mm}");
-            return parts.Count == 0 ? "Not checked yet" : string.Join("  ·  ", parts);
+            if (_current?.LastCommitSha is { Length: > 0 } sha) parts.Add($"{_current.DisplayName}: commit {sha[..Math.Min(7, sha.Length)]}");
+            if (_current?.LastUpdateTime is { } lu) parts.Add($"updated {lu:yyyy-MM-dd HH:mm}");
+            return string.Join("  ·  ", parts);
         }
 
         private void RefreshState()
         {
-            var s = AppInstance.Settings;
+            var s = Settings;
             bool on = s.AutoUpdateEnabled;
             AutoToggle.IsChecked = on;
             AutoBadgeText.Text = on ? "Auto update: ON" : "Auto update: OFF";
@@ -362,13 +784,14 @@ namespace MultronUpdater
             AutoBadge.Background = on ? new SolidColorBrush(Color.FromRgb(0x1B, 0x3A, 0x26)) : new SolidColorBrush(Color.FromRgb(0x30, 0x36, 0x3D));
 
             NextCheckText.Text = on
-                ? (AppInstance.NextCheck is { } nc ? $"Next check at {nc:HH:mm}." : "Automatic updates are on, but the settings are incomplete.")
-                : "Automatic updates are off. Use \"Check now\" to update manually.";
+                ? (AppInstance.NextCheck is { } nc ? $"Next check at {nc:HH:mm}." : "Automatic updates are on, but no target is fully configured.")
+                : "Automatic updates are off. Use \"Check all now\" or \"Check this target\" to update manually.";
 
-            if (!AppInstance.Updater.IsBusy) StatusDetail.Text = BuildDetail();
+            bool busy = AppInstance.IsChecking;
+            BusyBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+            CheckAllButton.IsEnabled = CheckButton.IsEnabled = ForceButton.IsEnabled = !busy;
+            if (!busy) StatusDetail.Text = BuildDetail();
         }
-
-        // ================================================================ logs
 
         private void AddLog(LogEntry e)
         {
@@ -411,16 +834,10 @@ namespace MultronUpdater
 
         private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
         {
-            System.IO.Directory.CreateDirectory(AppSettings.DataFolder);
+            Directory.CreateDirectory(AppSettings.DataFolder);
             OpenPath(AppSettings.DataFolder);
         }
 
-        // ================================================================ helpers
-
-        /// <summary>
-        /// Accepts github.com/owner/repo[/tree|blob|raw/branch/path...] and
-        /// raw.githubusercontent.com/owner/repo/branch/path.
-        /// </summary>
         public static bool TryParseGitHubUrl(string input, out string owner, out string repo, out string? branch, out string? path)
         {
             owner = repo = ""; branch = path = null;
@@ -464,7 +881,6 @@ namespace MultronUpdater
             FlushAutoSave();
             if (!AppInstance.IsExiting)
             {
-                // Closing the window only hides it; the updater keeps running in the tray
                 e.Cancel = true;
                 Hide();
                 if (!_trayHintShown)

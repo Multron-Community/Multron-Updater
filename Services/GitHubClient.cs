@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -13,13 +14,10 @@ namespace MultronUpdater.Services
 {
     public sealed record RemoteFile(string RepoPath, string RelativePath, string BlobSha, long Size);
 
-    /// <summary>Reads the latest commit and file list via the GitHub REST API and downloads files.</summary>
     public sealed class GitHubClient : IDisposable
     {
         private readonly HttpClient _http;
-        private string? _etag;
-        private string? _etagKey;
-        private string? _cachedSha;
+        private readonly ConcurrentDictionary<string, (string ETag, string Sha)> _commitCache = new();
 
         public GitHubClient()
         {
@@ -42,44 +40,38 @@ namespace MultronUpdater.Services
         private static string EscPath(string path) =>
             string.Join("/", path.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Uri.EscapeDataString));
 
-        /// <summary>
-        /// Returns the latest commit SHA of the branch. Uses an ETag, so an unchanged branch
-        /// answers 304 and does not count against the GitHub rate limit.
-        /// </summary>
-        public async Task<string> GetLatestCommitShaAsync(AppSettings s, CancellationToken ct)
+        public async Task<string> GetLatestCommitShaAsync(UpdateProfile p, CancellationToken ct)
         {
-            var url = $"https://api.github.com/repos/{Esc(s.Owner)}/{Esc(s.Repo)}/commits/{Esc(s.Branch)}";
-            var key = url + "|" + s.EncryptedToken;
-            using var req = ApiRequest(url, "application/vnd.github.sha", s.GetToken());
-            if (_etag != null && _etagKey == key && _cachedSha != null)
-                req.Headers.TryAddWithoutValidation("If-None-Match", _etag);
+            var url = $"https://api.github.com/repos/{Esc(p.Owner)}/{Esc(p.Repo)}/commits/{Esc(p.Branch)}";
+            var key = url + "|" + p.EncryptedToken;
+            using var req = ApiRequest(url, "application/vnd.github.sha", p.GetToken());
+            if (_commitCache.TryGetValue(key, out var cached))
+                req.Headers.TryAddWithoutValidation("If-None-Match", cached.ETag);
 
             using var res = await _http.SendAsync(req, ct);
-            if (res.StatusCode == HttpStatusCode.NotModified && _cachedSha != null)
-                return _cachedSha;
+            if (res.StatusCode == HttpStatusCode.NotModified && cached.Sha != null)
+                return cached.Sha;
 
             await EnsureOk(res, "commit info");
             var sha = (await res.Content.ReadAsStringAsync(ct)).Trim();
-            _cachedSha = sha;
-            _etag = res.Headers.ETag?.ToString();
-            _etagKey = key;
+            var etag = res.Headers.ETag?.ToString();
+            if (etag != null) _commitCache[key] = (etag, sha);
             return sha;
         }
 
-        /// <summary>Lists the files at RepoPath (a single file, or every file under a folder) in the given commit.</summary>
-        public async Task<List<RemoteFile>> GetFilesAsync(AppSettings s, string commitSha, CancellationToken ct)
+        public async Task<List<RemoteFile>> GetFilesAsync(UpdateProfile p, string commitSha, CancellationToken ct)
         {
-            var url = $"https://api.github.com/repos/{Esc(s.Owner)}/{Esc(s.Repo)}/git/trees/{Esc(commitSha)}?recursive=1";
-            using var req = ApiRequest(url, "application/vnd.github+json", s.GetToken());
+            var url = $"https://api.github.com/repos/{Esc(p.Owner)}/{Esc(p.Repo)}/git/trees/{Esc(commitSha)}?recursive=1";
+            using var req = ApiRequest(url, "application/vnd.github+json", p.GetToken());
             using var res = await _http.SendAsync(req, ct);
             await EnsureOk(res, "file list");
 
             using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
             var root = doc.RootElement;
             if (root.TryGetProperty("truncated", out var tr) && tr.GetBoolean())
-                Logger.Warn("The repository is very large; GitHub truncated the file list. Some files may be missing.");
+                Logger.Warn($"[{p.DisplayName}] The repository is very large; GitHub truncated the file list. Some files may be missing.");
 
-            var target = s.RepoPath.Replace('\\', '/').Trim('/');
+            var target = p.RepoPath.Replace('\\', '/').Trim('/');
             var result = new List<RemoteFile>();
             foreach (var item in root.GetProperty("tree").EnumerateArray())
             {
@@ -89,20 +81,19 @@ namespace MultronUpdater.Services
                 var size = item.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0;
 
                 if (string.Equals(path, target, StringComparison.Ordinal))
-                    result.Add(new RemoteFile(path, Path.GetFileName(path), sha, size));                 // single-file mode
+                    result.Add(new RemoteFile(path, Path.GetFileName(path), sha, size));
                 else if (path.StartsWith(target + "/", StringComparison.Ordinal))
-                    result.Add(new RemoteFile(path, path[(target.Length + 1)..], sha, size));             // folder mode
+                    result.Add(new RemoteFile(path, path[(target.Length + 1)..], sha, size));
             }
             return result;
         }
 
-        /// <summary>Downloads a file pinned to the commit SHA (no CDN cache delay). Reports bytes received.</summary>
-        public async Task DownloadAsync(AppSettings s, string commitSha, RemoteFile f, string destFile,
+        public async Task DownloadAsync(UpdateProfile p, string commitSha, RemoteFile f, string destFile,
                                         Action<long>? onBytes, CancellationToken ct)
         {
-            var url = $"https://raw.githubusercontent.com/{Esc(s.Owner)}/{Esc(s.Repo)}/{commitSha}/{EscPath(f.RepoPath)}";
+            var url = $"https://raw.githubusercontent.com/{Esc(p.Owner)}/{Esc(p.Repo)}/{commitSha}/{EscPath(f.RepoPath)}";
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            var token = s.GetToken();
+            var token = p.GetToken();
             if (!string.IsNullOrWhiteSpace(token))
                 req.Headers.Authorization = new AuthenticationHeaderValue("token", token);
 

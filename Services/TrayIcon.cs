@@ -7,7 +7,6 @@ using WinForms = System.Windows.Forms;
 
 namespace MultronUpdater.Services
 {
-    /// <summary>System tray icon with a context menu and a spinning animation while an update downloads.</summary>
     public sealed class TrayIcon : IDisposable
     {
         private readonly WinForms.NotifyIcon _icon;
@@ -83,7 +82,6 @@ namespace MultronUpdater.Services
         public void ShowBalloon(string title, string text, bool error = false) =>
             _icon.ShowBalloonTip(4000, title, text, error ? WinForms.ToolTipIcon.Error : WinForms.ToolTipIcon.Info);
 
-        /// <summary>Pre-renders 12 rotated copies of the app icon for the spinning animation.</summary>
         private void BuildFrames(Icon appIcon)
         {
             var size = WinForms.SystemInformation.SmallIconSize.Width;

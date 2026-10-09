@@ -7,7 +7,6 @@
         ResizeMode="NoResize" Topmost="True" ShowActivated="False" ShowInTaskbar="True"
         Icon="/Assets/app.ico" FontFamily="Segoe UI">
 
-    <!-- Progress on the taskbar button -->
     <Window.TaskbarItemInfo>
         <TaskbarItemInfo x:Name="Taskbar" ProgressState="Indeterminate"/>
     </Window.TaskbarItemInfo>
@@ -29,7 +28,6 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Animated icon: spinner while working, check mark / cross when done -->
                 <Grid Width="36" Height="36" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0">
                     <Grid x:Name="SpinnerGroup">
                         <Ellipse Stroke="#30363D" StrokeThickness="3.5"/>

@@ -1,7 +1,7 @@
 <Window x:Class="MultronUpdater.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Multron Updater" Width="800" Height="740" MinWidth="660" MinHeight="540"
+        Title="Multron Updater" Width="1040" Height="760" MinWidth="860" MinHeight="560"
         WindowStartupLocation="CenterScreen" Background="{StaticResource BgBrush}"
         Icon="/Assets/app.ico" FontFamily="Segoe UI" FontSize="13">
 
@@ -9,8 +9,11 @@
         <TaskbarItemInfo x:Name="Taskbar"/>
     </Window.TaskbarItemInfo>
 
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </Window.Resources>
+
     <DockPanel>
-        <!-- ===== Header ===== -->
         <Border DockPanel.Dock="Top" Background="{StaticResource HeaderBrush}" Padding="20,14">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -21,7 +24,7 @@
                 <Image Source="/Assets/app.ico" Width="38" Height="38"/>
                 <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
                     <TextBlock Text="Multron Updater" Foreground="White" FontSize="19" FontWeight="SemiBold"/>
-                    <TextBlock Text="Keeps your program up to date from GitHub automatically" Foreground="#8B949E" FontSize="12"/>
+                    <TextBlock Text="Keeps your programs up to date from GitHub automatically" Foreground="#8B949E" FontSize="12"/>
                 </StackPanel>
                 <Border Grid.Column="2" x:Name="AutoBadge" CornerRadius="12" Padding="11,5" Background="#30363D"
                         VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="AutoBadge_Click"
@@ -34,7 +37,6 @@
             </Grid>
         </Border>
 
-        <!-- ===== Bottom action bar ===== -->
         <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="0,1,0,0" Padding="20,10">
             <Grid>
@@ -52,10 +54,8 @@
                     <TextBlock x:Name="SavedText" Foreground="{StaticResource AccentDarkBrush}" FontWeight="SemiBold"
                                VerticalAlignment="Center" Margin="0,0,12,0"
                                ToolTip="Settings are saved automatically when you change them"/>
-                    <Button x:Name="ForceButton" Content="Force update" Margin="0,0,8,0" Click="ForceButton_Click"
-                            ToolTip="Download all files again, close the program and restart it"/>
-                    <Button x:Name="CheckButton" Content="Check now" Margin="0,0,8,0" Click="CheckButton_Click"
-                            ToolTip="Check GitHub now and update if something changed"/>
+                    <Button x:Name="CheckAllButton" Content="Check all now" Margin="0,0,8,0" Click="CheckAllButton_Click"
+                            ToolTip="Check every enabled target and update the ones that changed"/>
                     <Button x:Name="SaveButton" Content="Save settings" Style="{StaticResource PrimaryButton}" Click="SaveButton_Click"/>
                 </StackPanel>
             </Grid>
@@ -63,115 +63,394 @@
         <ProgressBar x:Name="BusyBar" DockPanel.Dock="Bottom" Height="3" IsIndeterminate="True" Visibility="Collapsed"
                      Foreground="{StaticResource AccentBrush}" Background="Transparent" BorderThickness="0"/>
 
-        <!-- ===== Tabs ===== -->
         <TabControl x:Name="Tabs" Margin="20,10,20,0" Background="Transparent" BorderThickness="0" Padding="0,12,0,0">
 
-            <!-- ===================== SETTINGS ===================== -->
-            <TabItem Header="Settings">
+            <TabItem Header="Targets">
+                <Grid Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="250"/>
+                        <ColumnDefinition Width="14"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Style="{StaticResource Card}" Margin="0" Padding="10">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Targets" Style="{StaticResource CardTitle}" Margin="6,2,0,8"/>
+                            <UniformGrid DockPanel.Dock="Bottom" Columns="3" Margin="0,8,0,0">
+                                <Button Content="+ Add" Margin="0,0,4,0" Padding="6,6" Click="AddProfile_Click" ToolTip="Add a new target"/>
+                                <Button Content="Duplicate" Margin="2,0" Padding="6,6" Click="DuplicateProfile_Click" ToolTip="Copy the selected target"/>
+                                <Button Content="Remove" Margin="4,0,0,0" Padding="6,6" Click="RemoveProfile_Click" ToolTip="Delete the selected target"/>
+                            </UniformGrid>
+                            <ListBox x:Name="ProfileList" BorderThickness="0" Background="Transparent"
+                                     SelectionChanged="ProfileList_SelectionChanged"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="8,7"/>
+                                        <Setter Property="Margin" Value="0,0,0,2"/>
+                                        <Setter Property="Cursor" Value="Hand"/>
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="bd" CornerRadius="6" Padding="{TemplateBinding Padding}" Background="Transparent">
+                                                        <ContentPresenter/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="bd" Property="Background" Value="#F3F5F7"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="bd" Property="Background" Value="#DAFBE1"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse x:Name="dot" Width="9" Height="9" Fill="#2EA043" VerticalAlignment="Top" Margin="0,5,0,0"/>
+                                            <StackPanel Grid.Column="1" Margin="9,0,0,0">
+                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="#1F2328"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{Binding SourceText}" FontSize="11.5" Foreground="#656D76"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock x:Name="status" Text="{Binding Status}" FontSize="11" Foreground="#656D76"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                        </Grid>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                                <Setter TargetName="dot" Property="Fill" Value="#C9D1D9"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding Status}" Value="">
+                                                <Setter TargetName="status" Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+
+                    <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
+                        <StackPanel x:Name="Editor">
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Target name" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
+                                            <TextBox x:Name="NameBox" FontSize="14" FontWeight="SemiBold"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="12,0,0,0">
+                                            <Button x:Name="CheckButton" Content="Check this target" Margin="0,0,8,0" Click="CheckButton_Click"
+                                                    ToolTip="Check GitHub now and update this target if something changed"/>
+                                            <Button x:Name="ForceButton" Content="Force update" Click="ForceButton_Click"
+                                                    ToolTip="Download all files again and run the after-update actions"/>
+                                        </StackPanel>
+                                    </Grid>
+                                    <CheckBox x:Name="EnabledCheck" Content="Enabled (included in automatic updates and &quot;Check all now&quot;)" Margin="0,10,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="1.  GitHub source" Style="{StaticResource CardTitle}"/>
+
+                                    <TextBlock Text="GitHub link (optional – fills the fields below)" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="UrlBox" ToolTip="e.g. https://github.com/user/repo/blob/main/bin/Release/App.exe"/>
+                                        <Button Grid.Column="1" Content="Fill from link" Margin="8,0,0,0" Click="FillFromLink_Click"/>
+                                    </Grid>
+                                    <TextBlock Style="{StaticResource Hint}"
+                                               Text="Paste a link like https://github.com/user/repo/blob/main/bin/Release/App.exe"/>
+
+                                    <Grid Margin="0,4,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Owner (user or organization)" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox x:Name="OwnerBox"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Repository" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox x:Name="RepoBox"/>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="160"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Branch" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox x:Name="BranchBox"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Path in repository (file or folder)" Style="{StaticResource FieldLabel}"/>
+                                            <TextBox x:Name="RepoPathBox"/>
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Style="{StaticResource Hint}"
+                                               Text="A single file (bin/Release/App.exe) or a folder (bin/Release). With a folder, every file inside it is kept in sync."/>
+
+                                    <TextBlock Text="Access token (optional)" Style="{StaticResource FieldLabel}"/>
+                                    <PasswordBox x:Name="TokenBox"/>
+                                    <TextBlock Style="{StaticResource Hint}"
+                                               Text="Only needed for private repositories or if you hit GitHub's request limit. Stored encrypted for your Windows user."/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="2.  Program on this computer" Style="{StaticResource CardTitle}"/>
+
+                                    <TextBlock Text="Target folder (where the files are installed)" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="FolderBox"/>
+                                        <Button Grid.Column="1" Content="Browse..." Margin="8,0,0,0" Click="BrowseFolder_Click"/>
+                                        <Button Grid.Column="2" Content="Open" Margin="8,0,0,0" Click="OpenFolder_Click"/>
+                                    </Grid>
+
+                                    <TextBlock Text="Program to close while updating (.exe, optional)" Style="{StaticResource FieldLabel}"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="ExeBox"/>
+                                        <Button Grid.Column="1" Content="Browse..." Margin="8,0,0,0" Click="BrowseExe_Click"/>
+                                    </Grid>
+                                    <TextBlock Style="{StaticResource Hint}"
+                                               Text="This program is closed before the files are replaced."/>
+
+                                    <CheckBox x:Name="BackupCheck" Content="Keep a backup of replaced files (last 3 updates)" Margin="0,10,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="3.  Files to update" Style="{StaticResource CardTitle}"/>
+                                    <CheckBox x:Name="OnlyFilesCheck" Content="Update only the checked files, in groups" Margin="0,0,0,0"/>
+                                    <TextBlock Style="{StaticResource Hint}"
+                                               Text="Off: every file under the repository path is updated and section 4 decides what happens afterwards. On: only checked files in enabled groups are updated, and each group runs its own actions when one of its files changes."/>
+
+                                    <Grid Margin="0,12,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid>
+                                            <TextBox x:Name="FileFilterBox" TextChanged="FileFilter_Changed"/>
+                                            <TextBlock Text="Filter files..." Foreground="#8C959F" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Text, ElementName=FileFilterBox}" Value="">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+                                        <Button Grid.Column="1" Content="+ New group" Margin="8,0,0,0" Click="NewGroup_Click"/>
+                                        <Button Grid.Column="2" Content="Add files..." Margin="8,0,0,0" Click="AddFiles_Click"/>
+                                        <Button Grid.Column="3" x:Name="LoadFilesButton" Content="Load from GitHub" Margin="8,0,0,0" Click="LoadFiles_Click"
+                                                ToolTip="List the files on GitHub and mark which ones changed"/>
+                                    </Grid>
+                                    <TextBlock x:Name="FilesSummary" Style="{StaticResource Hint}" Margin="0,0,0,8"/>
+
+                                    <ItemsControl x:Name="GroupsList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border x:Name="groupBorder" Tag="{Binding}" BorderBrush="#D9DEE3" BorderThickness="1"
+                                                        CornerRadius="6" Margin="0,0,0,8" Background="White">
+                                                    <DockPanel>
+                                                        <Border DockPanel.Dock="Top" Background="#F6F8FA" CornerRadius="6,6,0,0" Padding="8,6"
+                                                                BorderBrush="#D9DEE3" BorderThickness="0,0,0,1">
+                                                            <StackPanel>
+                                                                <Grid>
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                        <ColumnDefinition Width="*"/>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <ToggleButton IsChecked="{Binding IsExpanded}" Width="22" Height="22" Cursor="Hand"
+                                                                                  ToolTip="Show or hide the files">
+                                                                        <ToggleButton.Template>
+                                                                            <ControlTemplate TargetType="ToggleButton">
+                                                                                <Border Background="Transparent">
+                                                                                    <TextBlock x:Name="arrow" Text="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                                                                               HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#656D76"/>
+                                                                                </Border>
+                                                                                <ControlTemplate.Triggers>
+                                                                                    <Trigger Property="IsChecked" Value="True">
+                                                                                        <Setter TargetName="arrow" Property="Text" Value="&#xE70D;"/>
+                                                                                    </Trigger>
+                                                                                </ControlTemplate.Triggers>
+                                                                            </ControlTemplate>
+                                                                        </ToggleButton.Template>
+                                                                    </ToggleButton>
+                                                                    <CheckBox Grid.Column="1" IsChecked="{Binding AllChecked, Mode=TwoWay}" Margin="4,0,6,0"
+                                                                              VerticalAlignment="Center" ToolTip="Check or uncheck every file in this group"/>
+                                                                    <TextBox Grid.Column="2" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" FontWeight="SemiBold"
+                                                                             BorderThickness="0" Background="Transparent" Padding="2,1" ToolTip="Group name (click to rename)"/>
+                                                                    <TextBlock Grid.Column="3" Text="{Binding CountText}" Foreground="#656D76" FontSize="11.5"
+                                                                               VerticalAlignment="Center" Margin="8,0"/>
+                                                                    <Button Grid.Column="4" Content="&#xE74D;" FontFamily="Segoe MDL2 Assets" FontSize="11" Padding="7,4"
+                                                                            Background="Transparent" BorderBrush="Transparent" Foreground="#656D76"
+                                                                            Tag="{Binding}" Click="RemoveGroup_Click" ToolTip="Delete this group"/>
+                                                                </Grid>
+                                                                <StackPanel Orientation="Horizontal" Margin="32,4,0,0">
+                                                                    <CheckBox Content="Enabled" IsChecked="{Binding Enabled}" Margin="0,0,16,0" FontSize="12"/>
+                                                                    <CheckBox Content="Restart the program" IsChecked="{Binding RestartProgram}" Margin="0,0,16,0" FontSize="12"
+                                                                              ToolTip="Close the program before replacing this group's files and start it again afterwards"/>
+                                                                    <CheckBox Content="Refresh Edge (F5)" IsChecked="{Binding RefreshEdge}" FontSize="12"
+                                                                              ToolTip="Refresh the active Microsoft Edge tab after this group's files are updated"/>
+                                                                </StackPanel>
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <ItemsControl ItemsSource="{Binding Files}" Margin="0,2,0,2"
+                                                                      Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Border x:Name="row" Tag="{Binding}" Padding="10,4" Background="Transparent" Cursor="Hand"
+                                                                            Visibility="{Binding IsVisible, Converter={StaticResource BoolToVis}}"
+                                                                            MouseLeftButtonDown="FileRow_MouseDown" MouseRightButtonUp="FileRow_RightClick"
+                                                                            ToolTip="Drag onto another group to move it. Right-click for more.">
+                                                                        <Grid>
+                                                                            <Grid.ColumnDefinitions>
+                                                                                <ColumnDefinition Width="Auto"/>
+                                                                                <ColumnDefinition Width="*"/>
+                                                                                <ColumnDefinition Width="Auto"/>
+                                                                            </Grid.ColumnDefinitions>
+                                                                            <CheckBox IsChecked="{Binding Include}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                                                            <TextBlock Grid.Column="1" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                                                                                <Run Text="{Binding Folder, Mode=OneWay}" Foreground="#8C959F"/><Run Text="{Binding Name, Mode=OneWay}" Foreground="#1F2328"/>
+                                                                            </TextBlock>
+                                                                            <Border Grid.Column="2" x:Name="badge" Width="16" Height="16" CornerRadius="3" BorderThickness="1.5"
+                                                                                    BorderBrush="Transparent" Margin="8,0,0,0" ToolTip="{Binding StateText}" Background="Transparent">
+                                                                                <TextBlock x:Name="glyph" Text="" FontSize="11" FontWeight="Bold"
+                                                                                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0"/>
+                                                                            </Border>
+                                                                        </Grid>
+                                                                    </Border>
+                                                                    <DataTemplate.Triggers>
+                                                                        <Trigger SourceName="row" Property="IsMouseOver" Value="True">
+                                                                            <Setter TargetName="row" Property="Background" Value="#F6F8FA"/>
+                                                                        </Trigger>
+                                                                        <DataTrigger Binding="{Binding State}" Value="Changed">
+                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="#BF8700"/>
+                                                                            <Setter TargetName="glyph" Property="Text" Value="•"/>
+                                                                            <Setter TargetName="glyph" Property="Foreground" Value="#BF8700"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding State}" Value="New">
+                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="#1A7F37"/>
+                                                                            <Setter TargetName="glyph" Property="Text" Value="+"/>
+                                                                            <Setter TargetName="glyph" Property="Foreground" Value="#1A7F37"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding State}" Value="NotOnGitHub">
+                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="#CF222E"/>
+                                                                            <Setter TargetName="glyph" Property="Text" Value="−"/>
+                                                                            <Setter TargetName="glyph" Property="Foreground" Value="#CF222E"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding State}" Value="UpToDate">
+                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="#D0D7DE"/>
+                                                                            <Setter TargetName="glyph" Property="Text" Value="✓"/>
+                                                                            <Setter TargetName="glyph" Property="Foreground" Value="#8C959F"/>
+                                                                        </DataTrigger>
+                                                                    </DataTemplate.Triggers>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </DockPanel>
+                                                </Border>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                                                        <Setter TargetName="groupBorder" Property="BorderBrush" Value="#2EA043"/>
+                                                        <Setter TargetName="groupBorder" Property="Background" Value="#F0FFF4"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                                        <Setter TargetName="groupBorder" Property="Opacity" Value="0.6"/>
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <Grid x:Name="DropZone" Height="58" Margin="0,2,0,0">
+                                        <Rectangle Stroke="#AFB8C1" StrokeThickness="1.5" StrokeDashArray="4 3" RadiusX="6" RadiusY="6" Fill="#FAFBFC"/>
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="#656D76" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                            <TextBlock Foreground="#656D76" VerticalAlignment="Center" TextWrapping="Wrap">
+                                                <Run Text="Drag files or folders here from File Explorer" FontWeight="SemiBold"/>
+                                                <LineBreak/>
+                                                <Run Text="Drop them onto a group to add them there. They must be inside the target folder." FontSize="11.5"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="4.  After updating" Style="{StaticResource CardTitle}"/>
+                                    <CheckBox x:Name="RestartCheck" Content="Start the program again" Margin="0,0,0,0"/>
+                                    <CheckBox x:Name="EdgeCheck" Content="Refresh the active Microsoft Edge tab (F5)"/>
+                                    <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
+                                               Text="Used when the whole path is updated (section 3 is off). With file groups, each group has its own actions."/>
+                                    <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,0"
+                                               Text="Edge refresh brings the most recently used Edge window to the front, presses F5 and then gives focus back to the window you were using."/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="General">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,6,0">
                     <StackPanel Margin="0,0,0,8">
-
-                        <!-- 1. GitHub source -->
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <TextBlock Text="1.  GitHub source" Style="{StaticResource CardTitle}"/>
-
-                                <TextBlock Text="GitHub link (optional – fills the fields below)" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="UrlBox" ToolTip="e.g. https://github.com/user/repo/blob/main/bin/Release/App.exe"/>
-                                    <Button Grid.Column="1" Content="Fill from link" Margin="8,0,0,0" Click="FillFromLink_Click"/>
-                                </Grid>
-                                <TextBlock Style="{StaticResource Hint}"
-                                           Text="Paste a link like https://github.com/user/repo/blob/main/bin/Release/App.exe"/>
-
-                                <Grid Margin="0,4,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="12"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="Owner (user or organization)" Style="{StaticResource FieldLabel}"/>
-                                        <TextBox x:Name="OwnerBox"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Repository" Style="{StaticResource FieldLabel}"/>
-                                        <TextBox x:Name="RepoBox"/>
-                                    </StackPanel>
-                                </Grid>
-
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="160"/>
-                                        <ColumnDefinition Width="12"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <TextBlock Text="Branch" Style="{StaticResource FieldLabel}"/>
-                                        <TextBox x:Name="BranchBox" Text="main"/>
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Path in repository (file or folder)" Style="{StaticResource FieldLabel}"/>
-                                        <TextBox x:Name="RepoPathBox"/>
-                                    </StackPanel>
-                                </Grid>
-                                <TextBlock Style="{StaticResource Hint}"
-                                           Text="A single file (bin/Release/App.exe) or a folder (bin/Release). With a folder, every file inside it is kept in sync."/>
-
-                                <TextBlock Text="Access token (optional)" Style="{StaticResource FieldLabel}"/>
-                                <PasswordBox x:Name="TokenBox"/>
-                                <TextBlock Style="{StaticResource Hint}"
-                                           Text="Only needed for private repositories or if you hit GitHub's request limit. Stored encrypted for your Windows user."/>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- 2. Local program -->
-                        <Border Style="{StaticResource Card}">
-                            <StackPanel>
-                                <TextBlock Text="2.  Program on this computer" Style="{StaticResource CardTitle}"/>
-
-                                <TextBlock Text="Target folder (where the files are installed)" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="FolderBox"/>
-                                    <Button Grid.Column="1" Content="Browse..." Margin="8,0,0,0" Click="BrowseFolder_Click"/>
-                                    <Button Grid.Column="2" Content="Open" Margin="8,0,0,0" Click="OpenFolder_Click"/>
-                                </Grid>
-
-                                <TextBlock Text="Program to close and restart (.exe)" Style="{StaticResource FieldLabel}"/>
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="ExeBox"/>
-                                    <Button Grid.Column="1" Content="Browse..." Margin="8,0,0,0" Click="BrowseExe_Click"/>
-                                </Grid>
-                                <TextBlock Style="{StaticResource Hint}"
-                                           Text="This program is closed before the files are replaced and started again afterwards."/>
-
-                                <CheckBox x:Name="RestartCheck" Content="Start the program again after updating" Margin="0,10,0,0"/>
-                                <CheckBox x:Name="BackupCheck" Content="Keep a backup of replaced files (last 3 updates)"/>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- 3. Automatic updates -->
-                        <Border Style="{StaticResource Card}">
-                            <StackPanel>
-                                <TextBlock Text="3.  Automatic updates" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="Automatic updates" Style="{StaticResource CardTitle}"/>
 
                                 <CheckBox x:Name="AutoToggle" Style="{StaticResource ToggleSwitch}" Click="AutoToggle_Click">
                                     <StackPanel>
                                         <TextBlock Text="Update automatically" FontWeight="SemiBold" FontSize="13.5"/>
-                                        <TextBlock Text="When the file changes on GitHub, it is downloaded and installed in the background."
+                                        <TextBlock Text="When a file changes on GitHub, it is downloaded and installed in the background for every enabled target."
                                                    Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </CheckBox>
@@ -186,10 +465,9 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- 4. Application -->
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <TextBlock Text="4.  Application" Style="{StaticResource CardTitle}"/>
+                                <TextBlock Text="Application" Style="{StaticResource CardTitle}"/>
                                 <CheckBox x:Name="StartupCheck" Content="Start Multron Updater with Windows" Margin="0,0,0,0"/>
                                 <CheckBox x:Name="MinimizedCheck" Content="Start hidden in the tray when started with Windows"/>
                                 <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0"
@@ -202,7 +480,6 @@
                 </ScrollViewer>
             </TabItem>
 
-            <!-- ===================== LOGS ===================== -->
             <TabItem Header="Logs">
                 <DockPanel Margin="0,0,0,12">
                     <Grid DockPanel.Dock="Top" Margin="0,0,0,8">

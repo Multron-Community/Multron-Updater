@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -21,7 +22,7 @@ namespace MultronUpdater
         private TrayIcon? _tray;
         private MainWindow? _main;
         private DownloadToast? _toast;
-        private bool _toastSuppressed;   // user closed the popup during the current update
+        private bool _toastSuppressed;
         private readonly DispatcherTimer _autoTimer = new();
 
         public static new App Current => (App)Application.Current;
@@ -29,19 +30,17 @@ namespace MultronUpdater
         public AppSettings Settings { get; private set; } = new();
         public UpdateService Updater { get; } = new();
         public bool IsExiting { get; private set; }
+        public bool IsChecking { get; private set; }
         public DateTime? LastCheck { get; private set; }
         public DateTime? NextCheck { get; private set; }
 
-        /// <summary>Update progress, raised on the UI thread.</summary>
         public event Action<UpdateProgress>? ProgressChanged;
-        /// <summary>Raised when a check finishes or auto-update settings change.</summary>
         public event Action? StateChanged;
 
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
 
-            // Single instance: a second launch just brings the existing window to front
             _mutex = new Mutex(true, MutexName, out bool isFirst);
             _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
             if (!isFirst)
@@ -63,7 +62,7 @@ namespace MultronUpdater
             TaskScheduler.UnobservedTaskException += (_, ex) => { Logger.Error("Background error: " + ex.Exception.GetBaseException().Message); ex.SetObserved(); };
 
             Settings = AppSettings.Load();
-            Logger.Info("Multron Updater started.");
+            Logger.Info($"Multron Updater started ({Settings.Profiles.Count} target(s)).");
 
             System.Drawing.Icon appIcon;
             using (var s = GetResourceStream(new Uri("pack://application:,,,/Assets/app.ico"))!.Stream)
@@ -71,7 +70,7 @@ namespace MultronUpdater
 
             _tray = new TrayIcon(appIcon, Settings.AutoUpdateEnabled);
             _tray.OpenRequested += ShowMainWindow;
-            _tray.CheckRequested += () => _ = RunCheckAsync(force: false, manual: true);
+            _tray.CheckRequested += () => _ = RunCheckAsync(null, force: false, manual: true);
             _tray.AutoUpdateToggled += on => SetAutoUpdate(on);
             _tray.OpenLogRequested += OpenLogFile;
             _tray.ExitRequested += ExitApp;
@@ -80,26 +79,23 @@ namespace MultronUpdater
 
             _main = new MainWindow();
             bool launchedHidden = e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase)
-                                  && Settings.StartMinimized && Settings.IsConfigured(out _);
+                                  && Settings.StartMinimized && Settings.HasConfiguredProfile();
             if (!launchedHidden) ShowMainWindow();
 
             _autoTimer.Tick += async (_, _) =>
             {
                 NextCheck = DateTime.Now + _autoTimer.Interval;
-                await RunCheckAsync(force: false, manual: false);
+                await RunCheckAsync(null, force: false, manual: false);
             };
             ApplyAutoUpdate(checkSoon: true);
         }
 
-        // ------------------------------------------------------------------ automatic updates
-
-        /// <summary>Starts/stops the background timer according to the settings.</summary>
         public void ApplyAutoUpdate(bool checkSoon)
         {
             _autoTimer.Stop();
             _tray?.SetAutoUpdate(Settings.AutoUpdateEnabled);
 
-            if (Settings.AutoUpdateEnabled && Settings.IsConfigured(out _))
+            if (Settings.AutoUpdateEnabled && Settings.HasConfiguredProfile())
             {
                 var minutes = Math.Clamp(Settings.CheckIntervalMinutes, 1, 1440);
                 _autoTimer.Interval = TimeSpan.FromMinutes(minutes);
@@ -109,16 +105,15 @@ namespace MultronUpdater
 
                 if (checkSoon)
                 {
-                    // First check shortly after enabling / starting
                     var once = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-                    once.Tick += async (_, _) => { once.Stop(); await RunCheckAsync(force: false, manual: false); };
+                    once.Tick += async (_, _) => { once.Stop(); await RunCheckAsync(null, force: false, manual: false); };
                     once.Start();
                 }
             }
             else
             {
                 NextCheck = null;
-                _tray?.SetTooltip(Settings.AutoUpdateEnabled ? "Settings incomplete" : "Automatic updates off");
+                _tray?.SetTooltip(Settings.AutoUpdateEnabled ? "No configured target" : "Automatic updates off");
             }
             StateChanged?.Invoke();
         }
@@ -140,38 +135,80 @@ namespace MultronUpdater
             catch (Exception ex) { Logger.Error("Could not save settings: " + ex.Message); }
         }
 
-        /// <summary>Runs one check (and update if needed) on a background thread.</summary>
-        public async Task<UpdateResult> RunCheckAsync(bool force, bool manual)
+        public async Task<UpdateResult> RunCheckAsync(string? profileId, bool force, bool manual)
         {
-            if (Updater.IsBusy)
+            if (IsChecking)
             {
                 if (manual) Logger.Warn("An update check is already running.");
                 return UpdateResult.Busy;
             }
-            if (!Settings.IsConfigured(out var err))
+
+            List<UpdateProfile> targets = profileId == null
+                ? Settings.Profiles.Where(p => p.Enabled && p.IsConfigured(out _)).ToList()
+                : Settings.Profiles.Where(p => p.Id == profileId).ToList();
+
+            if (targets.Count == 0)
             {
-                if (manual) Logger.Warn("Cannot check: " + err);
+                if (manual) Logger.Warn("There is no enabled, fully configured target to check.");
                 return UpdateResult.Failed;
             }
-            if (manual) Logger.Info(force ? "Force update started by user." : "Update check started by user.");
+            if (targets.Count == 1 && !targets[0].IsConfigured(out var err))
+            {
+                if (manual) Logger.Warn($"[{targets[0].DisplayName}] Cannot check: {err}");
+                return UpdateResult.Failed;
+            }
 
-            var snapshot = Settings.Clone();
-            var result = await Task.Run(() => Updater.CheckAndUpdateAsync(snapshot, force));
+            if (manual)
+                Logger.Info(force
+                    ? $"Force update started for {targets[0].DisplayName}."
+                    : $"Update check started for {(targets.Count == 1 ? targets[0].DisplayName : $"{targets.Count} targets")}.");
 
-            LastCheck = DateTime.Now;
-            if (snapshot.LastCommitSha != null) Settings.LastCommitSha = snapshot.LastCommitSha;
-            if (snapshot.LastUpdateTime != null) Settings.LastUpdateTime = snapshot.LastUpdateTime;
-            SaveSettings();
+            IsChecking = true;
+            StateChanged?.Invoke();
+            var overall = UpdateResult.UpToDate;
+            var updatedNames = new List<string>();
+            try
+            {
+                foreach (var target in targets)
+                {
+                    var snapshot = target.Clone();
+                    var result = await Task.Run(() => Updater.CheckAndUpdateAsync(snapshot, force));
 
-            if (result == UpdateResult.Updated && Settings.NotifyOnUpdate && _toast == null)
-                _tray?.ShowBalloon("Multron Updater", $"{Settings.ExeName} was updated from GitHub.");
+                    var live = Settings.Profiles.FirstOrDefault(p => p.Id == target.Id);
+                    if (live != null)
+                    {
+                        if (snapshot.LastCommitSha != null) live.LastCommitSha = snapshot.LastCommitSha;
+                        if (snapshot.LastUpdateTime != null) live.LastUpdateTime = snapshot.LastUpdateTime;
+                    }
+                    if (result == UpdateResult.Updated) updatedNames.Add(target.DisplayName);
+                    if (result == UpdateResult.Failed) overall = UpdateResult.Failed;
+                    else if (result == UpdateResult.Updated && overall != UpdateResult.Failed) overall = UpdateResult.Updated;
+                }
+            }
+            finally
+            {
+                IsChecking = false;
+                LastCheck = DateTime.Now;
+                SaveSettings();
+            }
+
+            if (updatedNames.Count > 0 && Settings.NotifyOnUpdate && _toast == null)
+                _tray?.ShowBalloon("Multron Updater", "Updated from GitHub: " + string.Join(", ", updatedNames));
 
             StateChanged?.Invoke();
-            return result;
+            return overall;
         }
 
         private void OnProgress(UpdateProgress p)
         {
+            var profile = Settings.Profiles.FirstOrDefault(x => x.Id == p.ProfileId);
+            if (profile != null)
+            {
+                profile.Status = p.Stage == UpdateStage.Downloading && p.BytesTotal > 0
+                    ? $"Downloading {p.BytesDone * 100 / p.BytesTotal}%"
+                    : p.Message;
+            }
+
             ProgressChanged?.Invoke(p);
 
             switch (p.Stage)
@@ -182,14 +219,18 @@ namespace MultronUpdater
                 case UpdateStage.Starting:
                     _tray?.StartAnimation();
                     _tray?.SetTooltip(p.Stage == UpdateStage.Downloading && p.BytesTotal > 0
-                        ? $"Downloading {p.BytesDone * 100 / p.BytesTotal}%"
-                        : p.Message);
+                        ? $"{p.ProfileName}: downloading {p.BytesDone * 100 / p.BytesTotal}%"
+                        : $"{p.ProfileName}: {p.Message}");
                     if (Settings.NotifyOnUpdate && !_toastSuppressed)
                     {
-                        if (_toast == null)
+                        if (_toast == null || _toast.IsClosing)
                         {
                             var toast = new DownloadToast();
-                            toast.Closed += (_, _) => { if (!toast.IsFinished) _toastSuppressed = true; _toast = null; };
+                            toast.Closed += (_, _) =>
+                            {
+                                if (!toast.IsFinished) _toastSuppressed = true;
+                                if (_toast == toast) _toast = null;
+                            };
                             toast.Clicked += ShowMainWindow;
                             _toast = toast;
                             toast.Show();
@@ -200,21 +241,19 @@ namespace MultronUpdater
 
                 case UpdateStage.Completed:
                     _tray?.StopAnimation();
-                    _tray?.SetTooltip(p.Message);
-                    _toast?.ShowCompleted(p.Message);
+                    _tray?.SetTooltip($"{p.ProfileName}: {p.Message}");
+                    _toast?.ShowCompleted(p.ProfileName, p.Message);
                     _toastSuppressed = false;
                     break;
 
                 case UpdateStage.Failed:
                     _tray?.StopAnimation();
-                    _tray?.SetTooltip("Last check failed");
-                    _toast?.ShowFailed(p.Message);
+                    _tray?.SetTooltip($"{p.ProfileName}: last check failed");
+                    _toast?.ShowFailed(p.ProfileName, p.Message);
                     _toastSuppressed = false;
                     break;
             }
         }
-
-        // ------------------------------------------------------------------ window / exit
 
         public void ShowMainWindow()
         {
@@ -222,7 +261,7 @@ namespace MultronUpdater
             _main.Show();
             if (_main.WindowState == WindowState.Minimized) _main.WindowState = WindowState.Normal;
             _main.Activate();
-            _main.Topmost = true;   // bring to front reliably
+            _main.Topmost = true;
             _main.Topmost = false;
             _main.Focus();
         }
@@ -242,11 +281,11 @@ namespace MultronUpdater
             if (IsExiting) return;
             IsExiting = true;
             Logger.Info("Multron Updater closed.");
-            _main?.Close();      // saves any pending setting changes first
+            _main?.Close();
             _autoTimer.Stop();
             _toast?.Close();
             _tray?.Dispose();
-            _showEvent?.Set();   // let the listener thread end
+            _showEvent?.Set();
             Shutdown();
         }
 

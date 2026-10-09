@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -16,6 +17,8 @@ namespace MultronUpdater.Services
     public enum UpdateStage { Checking, Downloading, Closing, Installing, Starting, Completed, Failed }
 
     public sealed record UpdateProgress(
+        string ProfileId,
+        string ProfileName,
         UpdateStage Stage,
         string Message,
         int FileIndex = 0,
@@ -24,88 +27,141 @@ namespace MultronUpdater.Services
         long BytesTotal = 0,
         string CurrentFile = "");
 
-    /// <summary>
-    /// Check → download → close exe → replace files → restart.
-    /// Local files are compared with GitHub's blob SHA, so only changed files are downloaded.
-    /// </summary>
+    public enum FileState { Unknown, UpToDate, Changed, New, NotOnGitHub }
+
+    public sealed record FileStatus(string RelativePath, FileState State, long Size);
+
     public sealed class UpdateService : IDisposable
     {
         private readonly GitHubClient _github = new();
         private readonly SemaphoreSlim _gate = new(1, 1);
-        private string? _lastVerifiedKey;   // commit+source whose files were verified as identical in this session
+        private readonly ConcurrentDictionary<string, string> _verified = new();
 
-        /// <summary>Raised from a background thread.</summary>
         public event Action<UpdateProgress>? Progress;
 
         public bool IsBusy => _gate.CurrentCount == 0;
 
-        public async Task<UpdateResult> CheckAndUpdateAsync(AppSettings s, bool force, CancellationToken ct = default)
+        public async Task<UpdateResult> CheckAndUpdateAsync(UpdateProfile p, bool force, CancellationToken ct = default)
         {
             if (!await _gate.WaitAsync(0, ct)) return UpdateResult.Busy;
-
+            var name = p.DisplayName;
             try
             {
-                if (!s.IsConfigured(out var err)) throw new InvalidOperationException("Settings are incomplete: " + err);
+                if (!p.IsConfigured(out var err)) throw new InvalidOperationException("Settings are incomplete: " + err);
 
-                Report(new UpdateProgress(UpdateStage.Checking, "Checking GitHub..."));
-                var sha = await _github.GetLatestCommitShaAsync(s, ct);
+                Report(p, UpdateStage.Checking, "Checking GitHub...");
+                var sha = await _github.GetLatestCommitShaAsync(p, ct);
                 var shortSha = sha[..Math.Min(7, sha.Length)];
-                var key = sha + "|" + s.SourceKey;
+                var key = sha + "|" + p.SourceKey + "|" + p.SelectionKey;
 
-                if (!force && key == _lastVerifiedKey)
+                if (!force && _verified.TryGetValue(p.Id, out var known) && known == key)
                 {
-                    Report(new UpdateProgress(UpdateStage.Completed, $"Up to date (commit {shortSha})"));
+                    Report(p, UpdateStage.Completed, $"Up to date (commit {shortSha})");
                     return UpdateResult.UpToDate;
                 }
 
-                var files = await _github.GetFilesAsync(s, sha, ct);
+                var files = await _github.GetFilesAsync(p, sha, ct);
                 if (files.Count == 0)
-                    throw new InvalidOperationException($"Path '{s.RepoPath}' was not found in branch '{s.Branch}'.");
+                    throw new InvalidOperationException($"Path '{p.RepoPath}' was not found in branch '{p.Branch}'.");
 
-                var localRoot = Path.GetFullPath(s.LocalFolder);
+                if (p.OnlySelectedFiles)
+                {
+                    var wanted = p.GetIncludedFiles();
+                    if (wanted.Count == 0)
+                        throw new InvalidOperationException("\"Update only the checked files\" is on, but no file is checked in an enabled group.");
+                    files = files.Where(f => wanted.ContainsKey(f.RelativePath)).ToList();
+                    if (files.Count == 0)
+                        throw new InvalidOperationException($"None of the checked files exist under '{p.RepoPath}' on GitHub.");
+                }
+
+                var localRoot = Path.GetFullPath(p.LocalFolder);
+                var rootWithSlash = localRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
                 var changed = new List<(RemoteFile Remote, string LocalPath)>();
                 foreach (var f in files)
                 {
                     var local = Path.GetFullPath(Path.Combine(localRoot, f.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
-                    if (!local.StartsWith(localRoot, StringComparison.OrdinalIgnoreCase)) continue; // never write outside the target folder
+                    if (!local.StartsWith(rootWithSlash, StringComparison.OrdinalIgnoreCase)) continue;
                     if (force || !File.Exists(local) || ComputeGitBlobSha(local) != f.BlobSha)
                         changed.Add((f, local));
                 }
 
-                s.LastCommitSha = sha;
+                p.LastCommitSha = sha;
                 if (changed.Count == 0)
                 {
-                    _lastVerifiedKey = key;
-                    Logger.Info($"Checked: files are up to date (commit {shortSha}).");
-                    Report(new UpdateProgress(UpdateStage.Completed, $"Up to date (commit {shortSha})"));
+                    _verified[p.Id] = key;
+                    Logger.Info($"[{name}] Checked: files are up to date (commit {shortSha}).");
+                    Report(p, UpdateStage.Completed, $"Up to date (commit {shortSha})");
                     return UpdateResult.UpToDate;
                 }
 
-                Logger.Info($"New version found (commit {shortSha}): {changed.Count} file(s) changed.");
+                Logger.Info($"[{name}] New version found (commit {shortSha}): {changed.Count} file(s) changed.");
+                await ApplyUpdateAsync(p, sha, changed, ct);
 
-                await ApplyUpdateAsync(s, sha, changed, ct);
-
-                _lastVerifiedKey = key;
-                s.LastUpdateTime = DateTime.Now;
+                _verified[p.Id] = key;
+                p.LastUpdateTime = DateTime.Now;
                 var done = $"Updated {changed.Count} file(s) to commit {shortSha}";
-                Logger.Success(done + ".");
-                Report(new UpdateProgress(UpdateStage.Completed, done, changed.Count, changed.Count));
+                Logger.Success($"[{name}] {done}.");
+                Report(p, UpdateStage.Completed, done, changed.Count, changed.Count);
                 return UpdateResult.Updated;
             }
             catch (Exception ex)
             {
                 var msg = ex is OperationCanceledException ? "Cancelled." : ex.Message;
-                Logger.Error(msg);
-                Report(new UpdateProgress(UpdateStage.Failed, msg));
+                Logger.Error($"[{name}] {msg}");
+                Report(p, UpdateStage.Failed, msg);
                 return UpdateResult.Failed;
             }
             finally { _gate.Release(); }
         }
 
-        private async Task ApplyUpdateAsync(AppSettings s, string sha, List<(RemoteFile Remote, string LocalPath)> changed, CancellationToken ct)
+        public async Task<List<FileStatus>> GetFileStatusAsync(UpdateProfile p, CancellationToken ct = default)
         {
-            // 1) Download everything to a staging folder and verify it (the program keeps running meanwhile)
-            var staging = Path.Combine(AppSettings.DataFolder, "downloads", sha[..7]);
+            if (!p.IsConfigured(out var err)) throw new InvalidOperationException(err);
+            var sha = await _github.GetLatestCommitShaAsync(p, ct);
+            var files = await _github.GetFilesAsync(p, sha, ct);
+            if (files.Count == 0)
+                throw new InvalidOperationException($"Path '{p.RepoPath}' was not found in branch '{p.Branch}'.");
+
+            var localRoot = Path.GetFullPath(p.LocalFolder);
+            var result = new List<FileStatus>();
+            var remotePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var f in files)
+            {
+                remotePaths.Add(f.RelativePath);
+                var local = Path.Combine(localRoot, f.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                var state = !File.Exists(local) ? FileState.New
+                          : ComputeGitBlobSha(local) == f.BlobSha ? FileState.UpToDate
+                          : FileState.Changed;
+                result.Add(new FileStatus(f.RelativePath, state, f.Size));
+            }
+            foreach (var path in p.AllTrackedPaths().Distinct(StringComparer.OrdinalIgnoreCase))
+                if (!remotePaths.Contains(path)) result.Add(new FileStatus(path, FileState.NotOnGitHub, 0));
+            return result;
+        }
+
+        private async Task ApplyUpdateAsync(UpdateProfile p, string sha, List<(RemoteFile Remote, string LocalPath)> changed, CancellationToken ct)
+        {
+            var name = p.DisplayName;
+
+            bool closeProgram, restartProgram, refreshEdge;
+            if (p.OnlySelectedFiles)
+            {
+                var groupOf = p.GetIncludedFiles();
+                var groups = changed.Select(c => groupOf.TryGetValue(c.Remote.RelativePath, out var g) ? g : null)
+                                    .Where(g => g != null).Distinct().ToList();
+                foreach (var g in groups)
+                    Logger.Info($"[{name}] Group \"{g!.Name}\": {changed.Count(c => groupOf[c.Remote.RelativePath] == g)} changed file(s).");
+                restartProgram = groups.Any(g => g!.RestartProgram);
+                refreshEdge = groups.Any(g => g!.RefreshEdge);
+                closeProgram = restartProgram;
+            }
+            else
+            {
+                closeProgram = true;
+                restartProgram = p.RestartAfterUpdate;
+                refreshEdge = p.RefreshEdgeAfterUpdate;
+            }
+            var staging = Path.Combine(AppSettings.DataFolder, "downloads", p.Id, sha[..7]);
             if (Directory.Exists(staging)) Directory.Delete(staging, true);
 
             long total = Math.Max(1, changed.Sum(c => c.Remote.Size));
@@ -115,15 +171,15 @@ namespace MultronUpdater.Services
             {
                 var remote = changed[i].Remote;
                 int index = i + 1;
-                Report(new UpdateProgress(UpdateStage.Downloading, "Downloading update...", index, changed.Count, doneBefore, total, remote.RelativePath));
+                Report(p, UpdateStage.Downloading, "Downloading update...", index, changed.Count, doneBefore, total, remote.RelativePath);
 
                 var dest = StagingPath(staging, remote);
-                await _github.DownloadAsync(s, sha, remote, dest, bytes =>
+                await _github.DownloadAsync(p, sha, remote, dest, bytes =>
                 {
-                    if ((DateTime.Now - lastReport).TotalMilliseconds < 80) return;   // throttle UI updates
+                    if ((DateTime.Now - lastReport).TotalMilliseconds < 80) return;
                     lastReport = DateTime.Now;
-                    Report(new UpdateProgress(UpdateStage.Downloading, "Downloading update...", index, changed.Count,
-                        doneBefore + Math.Min(bytes, remote.Size), total, remote.RelativePath));
+                    Report(p, UpdateStage.Downloading, "Downloading update...", index, changed.Count,
+                        doneBefore + Math.Min(bytes, remote.Size), total, remote.RelativePath);
                 }, ct);
                 doneBefore += remote.Size;
 
@@ -133,26 +189,24 @@ namespace MultronUpdater.Services
                         throw new InvalidOperationException($"'{remote.RepoPath}' is stored with Git LFS; LFS files are not supported.");
                     throw new InvalidOperationException($"Downloaded file '{remote.RepoPath}' failed verification (corrupt download).");
                 }
-                Logger.Info($"Downloaded {remote.RelativePath} ({FormatSize(remote.Size)}).");
+                Logger.Info($"[{name}] Downloaded {remote.RelativePath} ({FormatSize(remote.Size)}).");
             }
-            Report(new UpdateProgress(UpdateStage.Downloading, "Download complete", changed.Count, changed.Count, total, total));
-            Logger.Info($"{changed.Count} file(s) downloaded and verified.");
+            Report(p, UpdateStage.Downloading, "Download complete", changed.Count, changed.Count, total, total);
+            Logger.Info($"[{name}] {changed.Count} file(s) downloaded and verified.");
 
-            // 2) Close the program
-            string? exePath = string.IsNullOrWhiteSpace(s.ExeName) ? null : Path.Combine(Path.GetFullPath(s.LocalFolder), s.ExeName);
+            string? exePath = string.IsNullOrWhiteSpace(p.ExeName) ? null : Path.Combine(Path.GetFullPath(p.LocalFolder), p.ExeName);
             bool wasRunning = false;
-            if (exePath != null)
+            if (exePath != null && closeProgram)
             {
-                Report(new UpdateProgress(UpdateStage.Closing, $"Closing {Path.GetFileName(exePath)}..."));
-                wasRunning = await CloseProcessAsync(exePath);
+                Report(p, UpdateStage.Closing, $"Closing {Path.GetFileName(exePath)}...");
+                wasRunning = await CloseProcessAsync(exePath, name);
             }
 
-            // 3) Replace files (roll back from backup on failure)
-            var backup = Path.Combine(AppSettings.DataFolder, "backups", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            var backup = Path.Combine(AppSettings.DataFolder, "backups", p.Id, DateTime.Now.ToString("yyyyMMdd_HHmmss"));
             var replaced = new List<(string Local, string? Backup)>();
             try
             {
-                Report(new UpdateProgress(UpdateStage.Installing, "Installing update..."));
+                Report(p, UpdateStage.Installing, "Installing update...");
                 foreach (var (remote, local) in changed)
                 {
                     string? bak = null;
@@ -166,16 +220,16 @@ namespace MultronUpdater.Services
                     await RetryAsync(() => File.Copy(StagingPath(staging, remote), local, true), ct);
                     replaced.Add((local, bak));
                 }
-                Logger.Info($"{replaced.Count} file(s) replaced in {s.LocalFolder}.");
+                Logger.Info($"[{name}] {replaced.Count} file(s) replaced in {p.LocalFolder}.");
             }
             catch (Exception ex)
             {
-                Logger.Error("Replacing files failed, rolling back to the previous version: " + ex.Message);
+                Logger.Error($"[{name}] Replacing files failed, rolling back to the previous version: " + ex.Message);
                 foreach (var (local, bak) in replaced)
                 {
                     try { if (bak != null) File.Copy(bak, local, true); else File.Delete(local); } catch { }
                 }
-                if (exePath != null && wasRunning) StartProgram(exePath);
+                if (exePath != null && wasRunning) StartProgram(exePath, name);
                 throw;
             }
             finally
@@ -183,43 +237,48 @@ namespace MultronUpdater.Services
                 try { Directory.Delete(staging, true); } catch { }
             }
 
-            if (!s.KeepBackup) { try { if (Directory.Exists(backup)) Directory.Delete(backup, true); } catch { } }
+            if (!p.KeepBackup) { try { if (Directory.Exists(backup)) Directory.Delete(backup, true); } catch { } }
             else if (Directory.Exists(backup))
             {
-                Logger.Info($"Backup of replaced files: {backup}");
-                CleanupOldBackups(keep: 3);
+                Logger.Info($"[{name}] Backup of replaced files: {backup}");
+                CleanupOldBackups(Path.Combine(AppSettings.DataFolder, "backups", p.Id), keep: 3);
             }
 
-            // 4) Restart
-            if (exePath != null && s.RestartAfterUpdate)
+            if (exePath != null && restartProgram)
             {
-                Report(new UpdateProgress(UpdateStage.Starting, $"Starting {Path.GetFileName(exePath)}..."));
-                StartProgram(exePath);
+                Report(p, UpdateStage.Starting, $"Starting {Path.GetFileName(exePath)}...");
+                StartProgram(exePath, name);
+            }
+
+            if (refreshEdge)
+            {
+                Report(p, UpdateStage.Starting, "Refreshing the Edge tab...");
+                if (EdgeRefresher.RefreshActiveTab(out var edgeMsg)) Logger.Info($"[{name}] {edgeMsg}");
+                else Logger.Warn($"[{name}] Edge refresh skipped: {edgeMsg}");
             }
         }
 
         private static string StagingPath(string staging, RemoteFile f) =>
             Path.Combine(staging, f.RelativePath.Replace('/', Path.DirectorySeparatorChar));
 
-        /// <summary>Closes the exe gracefully, then forcefully if needed. Returns true if it was running.</summary>
-        public static async Task<bool> CloseProcessAsync(string exePath)
+        public static async Task<bool> CloseProcessAsync(string exePath, string profileName)
         {
             var name = Path.GetFileNameWithoutExtension(exePath);
             var procs = Process.GetProcessesByName(name).Where(p => p.Id != Environment.ProcessId && IsSameExe(p, exePath)).ToList();
-            if (procs.Count == 0) { Logger.Info($"{name} is not running."); return false; }
+            if (procs.Count == 0) { Logger.Info($"[{profileName}] {name} is not running."); return false; }
 
-            Logger.Info($"Closing {name} ({procs.Count} process(es))...");
+            Logger.Info($"[{profileName}] Closing {name} ({procs.Count} process(es))...");
             foreach (var p in procs) { try { p.CloseMainWindow(); } catch { } }
 
             for (int t = 0; t < 50 && procs.Any(p => !HasExited(p)); t++) await Task.Delay(100);
 
             foreach (var p in procs.Where(p => !HasExited(p)))
             {
-                try { p.Kill(entireProcessTree: true); Logger.Warn($"{name} did not close in time and was terminated."); }
+                try { p.Kill(entireProcessTree: true); Logger.Warn($"[{profileName}] {name} did not close in time and was terminated."); }
                 catch (Win32Exception ex) { throw new InvalidOperationException($"Could not close {name}: {ex.Message}"); }
             }
             foreach (var p in procs) { try { p.WaitForExit(10000); } catch { } p.Dispose(); }
-            await Task.Delay(500); // give Windows time to release file locks
+            await Task.Delay(500);
             return true;
         }
 
@@ -232,12 +291,12 @@ namespace MultronUpdater.Services
                 var path = p.MainModule?.FileName;
                 return path == null || string.Equals(Path.GetFullPath(path), Path.GetFullPath(exePath), StringComparison.OrdinalIgnoreCase);
             }
-            catch { return true; } // path unreadable: treat a same-named process as the target
+            catch { return true; }
         }
 
-        public static void StartProgram(string exePath)
+        public static void StartProgram(string exePath, string profileName)
         {
-            if (!File.Exists(exePath)) { Logger.Warn($"Cannot start, file not found: {exePath}"); return; }
+            if (!File.Exists(exePath)) { Logger.Warn($"[{profileName}] Cannot start, file not found: {exePath}"); return; }
             try
             {
                 Process.Start(new ProcessStartInfo(exePath)
@@ -245,9 +304,9 @@ namespace MultronUpdater.Services
                     UseShellExecute = true,
                     WorkingDirectory = Path.GetDirectoryName(exePath)!
                 });
-                Logger.Info($"Started {Path.GetFileName(exePath)}.");
+                Logger.Info($"[{profileName}] Started {Path.GetFileName(exePath)}.");
             }
-            catch (Exception ex) { Logger.Error("Could not start the program: " + ex.Message); }
+            catch (Exception ex) { Logger.Error($"[{profileName}] Could not start the program: " + ex.Message); }
         }
 
         private static async Task RetryAsync(Action action, CancellationToken ct)
@@ -260,11 +319,11 @@ namespace MultronUpdater.Services
             }
         }
 
-        private static void CleanupOldBackups(int keep)
+        private static void CleanupOldBackups(string folder, int keep)
         {
             try
             {
-                var root = new DirectoryInfo(Path.Combine(AppSettings.DataFolder, "backups"));
+                var root = new DirectoryInfo(folder);
                 if (!root.Exists) return;
                 foreach (var d in root.GetDirectories().OrderByDescending(d => d.Name).Skip(keep))
                     d.Delete(true);
@@ -272,7 +331,6 @@ namespace MultronUpdater.Services
             catch { }
         }
 
-        /// <summary>Git's file identity: SHA1("blob {size}\0" + content).</summary>
         public static string ComputeGitBlobSha(string file)
         {
             using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -302,7 +360,9 @@ namespace MultronUpdater.Services
             return u == 0 ? $"{bytes} B" : $"{v:0.0} {units[u]}";
         }
 
-        private void Report(UpdateProgress p) => Progress?.Invoke(p);
+        private void Report(UpdateProfile p, UpdateStage stage, string message, int fileIndex = 0, int fileCount = 0,
+                            long bytesDone = 0, long bytesTotal = 0, string currentFile = "") =>
+            Progress?.Invoke(new UpdateProgress(p.Id, p.DisplayName, stage, message, fileIndex, fileCount, bytesDone, bytesTotal, currentFile));
 
         public void Dispose() { _github.Dispose(); _gate.Dispose(); }
     }

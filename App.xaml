@@ -4,7 +4,6 @@
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
 
-        <!-- Colors -->
         <SolidColorBrush x:Key="AccentBrush" Color="#2EA043"/>
         <SolidColorBrush x:Key="AccentDarkBrush" Color="#1A7F37"/>
         <SolidColorBrush x:Key="BgBrush" Color="#F3F5F7"/>
@@ -14,7 +13,6 @@
         <SolidColorBrush x:Key="MutedBrush" Color="#656D76"/>
         <SolidColorBrush x:Key="HeaderBrush" Color="#161B22"/>
 
-        <!-- Card -->
         <Style x:Key="Card" TargetType="Border">
             <Setter Property="Background" Value="{StaticResource CardBrush}"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
@@ -44,7 +42,6 @@
             <Setter Property="Margin" Value="0,3,0,0"/>
         </Style>
 
-        <!-- Inputs -->
         <Style TargetType="TextBox">
             <Setter Property="Padding" Value="7,5"/>
             <Setter Property="FontSize" Value="13"/>
@@ -64,7 +61,6 @@
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
-        <!-- Buttons -->
         <Style x:Key="BtnBase" TargetType="Button">
             <Setter Property="Padding" Value="14,7"/>
             <Setter Property="FontSize" Value="13"/>
@@ -102,7 +98,6 @@
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
 
-        <!-- Toggle switch (used for "Automatic updates") -->
         <Style x:Key="ToggleSwitch" TargetType="CheckBox">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
@@ -144,7 +139,6 @@
             </Setter>
         </Style>
 
-        <!-- Tabs -->
         <Style TargetType="TabItem">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">

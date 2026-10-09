@@ -10,10 +10,6 @@ using MultronUpdater.Services;
 
 namespace MultronUpdater.Views
 {
-    /// <summary>
-    /// Bottom-right popup (just above the taskbar) that animates while an update downloads.
-    /// Its taskbar button shows the download progress as well.
-    /// </summary>
     public partial class DownloadToast : Window
     {
         private readonly DispatcherTimer _autoClose = new();
@@ -21,7 +17,6 @@ namespace MultronUpdater.Views
 
         public event Action? Clicked;
 
-        /// <summary>True once the update finished (success or failure).</summary>
         public bool IsFinished { get; private set; }
 
         public DownloadToast()
@@ -35,9 +30,18 @@ namespace MultronUpdater.Views
             _autoClose.Tick += (_, _) => { _autoClose.Stop(); SlideOutAndClose(); };
         }
 
+        public bool IsClosing => _closing;
+
         public void Update(UpdateProgress p)
         {
             _autoClose.Stop();
+            if (IsFinished)
+            {
+                IsFinished = false;
+                Bar.Foreground = new SolidColorBrush(Color.FromRgb(0x2E, 0xA0, 0x43));
+                FileText.TextWrapping = TextWrapping.NoWrap;
+                FileText.TextTrimming = TextTrimming.CharacterEllipsis;
+            }
             SpinnerGroup.Visibility = Visibility.Visible;
             ResultGroup.Visibility = Visibility.Collapsed;
 
@@ -46,7 +50,7 @@ namespace MultronUpdater.Views
                 double pct = Math.Clamp(p.BytesDone * 100.0 / p.BytesTotal, 0, 100);
                 SetIndeterminate(false);
                 AnimateBar(pct);
-                TitleText.Text = "Downloading update";
+                TitleText.Text = $"Updating {p.ProfileName}";
                 FileText.Text = string.IsNullOrEmpty(p.CurrentFile) ? p.Message : Path.GetFileName(p.CurrentFile);
                 DetailText.Text = $"{UpdateService.FormatSize(p.BytesDone)} of {UpdateService.FormatSize(p.BytesTotal)}" +
                                   (p.FileCount > 1 ? $"  ·  file {p.FileIndex} of {p.FileCount}" : "");
@@ -60,10 +64,10 @@ namespace MultronUpdater.Views
                 SetIndeterminate(true);
                 TitleText.Text = p.Stage switch
                 {
-                    UpdateStage.Closing => "Closing program",
-                    UpdateStage.Installing => "Installing update",
-                    UpdateStage.Starting => "Starting program",
-                    _ => "Downloading update"
+                    UpdateStage.Closing => $"{p.ProfileName}: closing program",
+                    UpdateStage.Installing => $"{p.ProfileName}: installing",
+                    UpdateStage.Starting => $"{p.ProfileName}: finishing",
+                    _ => $"Updating {p.ProfileName}"
                 };
                 FileText.Text = p.Message;
                 DetailText.Text = "";
@@ -73,12 +77,12 @@ namespace MultronUpdater.Views
             }
         }
 
-        public void ShowCompleted(string message)
+        public void ShowCompleted(string profileName, string message)
         {
             IsFinished = true;
             SetIndeterminate(false);
             AnimateBar(100);
-            TitleText.Text = "Update installed";
+            TitleText.Text = $"{profileName} updated";
             FileText.Text = message;
             DetailText.Text = "Click to open Multron Updater";
             PercentText.Text = "100%";
@@ -89,12 +93,12 @@ namespace MultronUpdater.Views
             ScheduleClose(TimeSpan.FromSeconds(5));
         }
 
-        public void ShowFailed(string message)
+        public void ShowFailed(string profileName, string message)
         {
             IsFinished = true;
             SetIndeterminate(false);
             Bar.Foreground = new SolidColorBrush(Color.FromRgb(0xDA, 0x36, 0x33));
-            TitleText.Text = "Update failed";
+            TitleText.Text = $"{profileName}: update failed";
             FileText.Text = message;
             FileText.TextWrapping = TextWrapping.Wrap;
             FileText.TextTrimming = TextTrimming.None;
@@ -107,11 +111,10 @@ namespace MultronUpdater.Views
             ScheduleClose(TimeSpan.FromSeconds(10));
         }
 
-        // ------------------------------------------------------------------ animations
 
         private void PlaceBottomRight()
         {
-            var wa = SystemParameters.WorkArea;   // screen area above the taskbar
+            var wa = SystemParameters.WorkArea;
             Left = wa.Right - ActualWidth;
             Top = wa.Bottom - ActualHeight;
         }

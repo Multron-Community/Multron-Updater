@@ -6,11 +6,6 @@ using System.Text;
 
 namespace MultronUpdater.Services
 {
-    /// <summary>
-    /// "Start with Windows" via a Task Scheduler logon task. The app runs elevated, so a
-    /// "Run" registry entry would be skipped by Windows; a task with highest privileges
-    /// starts it at logon without a UAC prompt.
-    /// </summary>
     public static class StartupHelper
     {
         private const string TaskName = "MultronUpdater";

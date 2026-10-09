@@ -16,10 +16,6 @@ namespace MultronUpdater.Services
         public override string ToString() => $"[{TimeText}] [{LevelText}] {Message}";
     }
 
-    /// <summary>
-    /// Log system: every entry goes to the Logs tab and to %AppData%\MultronUpdater\log.txt
-    /// (rotated to log.old.txt when it grows over 2 MB).
-    /// </summary>
     public static class Logger
     {
         private static readonly object Sync = new();
@@ -46,14 +42,13 @@ namespace MultronUpdater.Services
                         File.Move(LogFile, OldLogFile, true);
                     File.AppendAllText(LogFile, entry + Environment.NewLine);
                 }
-                catch { /* keep running even if the log file can't be written */ }
+                catch { }
             }
             EntryAdded?.Invoke(entry);
         }
 
         private static readonly Regex LineRx = new(@"^\[(?<t>[\d\- :]{19})\] \[(?<l>[A-Z]+)\] (?<m>.*)$", RegexOptions.Compiled);
 
-        /// <summary>Reads the last <paramref name="max"/> entries from the log file (shown when the app starts).</summary>
         public static List<LogEntry> ReadRecent(int max)
         {
             var list = new List<LogEntry>();

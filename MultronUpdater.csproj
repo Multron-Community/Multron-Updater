@@ -17,7 +17,6 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
-  <!-- Single-file .exe publish -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
