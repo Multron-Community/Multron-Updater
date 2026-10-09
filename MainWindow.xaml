@@ -248,7 +248,44 @@
                                         <Button Grid.Column="1" Content="Browse..." Margin="8,0,0,0" Click="BrowseExe_Click"/>
                                     </Grid>
                                     <TextBlock Style="{StaticResource Hint}"
-                                               Text="This program is closed before the files are replaced."/>
+                                               Text="This program is closed before the files are replaced and started again afterwards (if chosen)."/>
+
+                                    <TextBlock Text="Program type" Style="{StaticResource FieldLabel}" Margin="0,10,0,4"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton x:Name="WindowsAppRadio" GroupName="ProgramType" Content="Windows app" Margin="0,0,20,0"
+                                                     VerticalContentAlignment="Center" Checked="ProgramType_Changed"/>
+                                        <RadioButton x:Name="ConsoleAppRadio" GroupName="ProgramType" Content="Console app"
+                                                     VerticalContentAlignment="Center" Checked="ProgramType_Changed"/>
+                                        <TextBlock x:Name="DetectedTypeText" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                                                   VerticalAlignment="Center" Margin="16,0,0,0"/>
+                                    </StackPanel>
+
+                                    <TextBlock Text="Start arguments (optional)" Style="{StaticResource FieldLabel}" Margin="0,10,0,3"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox x:Name="ArgsBox" FontFamily="Cascadia Mono, Consolas"
+                                                 ToolTip="Passed to the program when it is started, e.g. --port 8080 --silent"/>
+                                        <Button Grid.Column="1" Content="Start now" Margin="8,0,0,0" Click="StartNow_Click"
+                                                ToolTip="Start the program now with these settings (to try them out)"/>
+                                    </Grid>
+
+                                    <Border x:Name="ConsoleOptions" Background="#F6F8FA" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                            CornerRadius="6" Padding="12,8" Margin="0,10,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Console window" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                            <RadioButton x:Name="ConsoleShowRadio" GroupName="ConsoleWindow" Content="Show the console window" Margin="0,4,0,0"/>
+                                            <RadioButton x:Name="ConsoleKeepRadio" GroupName="ConsoleWindow" Content="Show it and keep it open after the program exits (to read errors)" Margin="0,4,0,0"/>
+                                            <RadioButton x:Name="ConsoleHiddenRadio" GroupName="ConsoleWindow" Content="Run hidden in the background and write the output to a log file" Margin="0,4,0,0"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                <TextBlock Style="{StaticResource Hint}" Margin="0" VerticalAlignment="Center"
+                                                           Text="When closing for an update, Ctrl+C is sent first; the program is terminated if it does not exit within 5 seconds."/>
+                                            </StackPanel>
+                                            <Button Content="Open console log" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="10,4" Click="OpenConsoleLog_Click"/>
+                                        </StackPanel>
+                                    </Border>
 
                                     <CheckBox x:Name="BackupCheck" Content="Keep a backup of replaced files (last 3 updates)" Margin="0,10,0,0"/>
                                 </StackPanel>

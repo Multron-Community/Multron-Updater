@@ -48,6 +48,10 @@ namespace MultronUpdater.Services
 
         public string LocalFolder { get; set; } = "";
         public string ExeName { get; set; } = "";
+        public bool IsConsoleApp { get; set; } = false;
+        public string StartArguments { get; set; } = "";
+        public bool HideConsole { get; set; } = false;
+        public bool KeepConsoleOpen { get; set; } = false;
         public bool RestartAfterUpdate { get; set; } = true;
         public bool RefreshEdgeAfterUpdate { get; set; } = false;
         public bool KeepBackup { get; set; } = true;
@@ -180,7 +184,17 @@ namespace MultronUpdater.Services
                     ? JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsFile), JsonOpts) ?? new AppSettings()
                     : new AppSettings();
             }
-            catch { s = new AppSettings(); }
+            catch (Exception ex)
+            {
+                s = new AppSettings();
+                try
+                {
+                    var bad = SettingsFile + ".bad-" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    File.Copy(SettingsFile, bad, true);
+                    Logger.Warn($"settings.json could not be read ({ex.Message}). It was saved as {Path.GetFileName(bad)} and default settings are used.");
+                }
+                catch { }
+            }
 
             if (s.Profiles.Count == 0) s.Profiles.Add(new UpdateProfile { Name = "My program" });
             return s;

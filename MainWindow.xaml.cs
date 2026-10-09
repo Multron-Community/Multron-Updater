@@ -73,6 +73,11 @@ namespace MultronUpdater
             TokenBox.PasswordChanged += (_, _) => ScheduleAutoSave();
             foreach (var check in new[] { EnabledCheck, RestartCheck, EdgeCheck, BackupCheck, OnlyFilesCheck, NotifyCheck, MinimizedCheck, StartupCheck, SelfUpdateCheck })
                 check.Click += (_, _) => ScheduleAutoSave();
+            foreach (var radio in new[] { WindowsAppRadio, ConsoleAppRadio, ConsoleShowRadio, ConsoleKeepRadio, ConsoleHiddenRadio })
+                radio.Click += (_, _) => ScheduleAutoSave();
+            ArgsBox.TextChanged += (_, _) => ScheduleAutoSave();
+            ExeBox.TextChanged += (_, _) => UpdateDetectedType();
+            FolderBox.TextChanged += (_, _) => UpdateDetectedType();
 
             _autoSave.Tick += (_, _) => { _autoSave.Stop(); SaveForm(showConfirmation: false, silent: true); };
             _savedFade.Tick += (_, _) => { _savedFade.Stop(); SavedText.Text = ""; };
@@ -125,6 +130,14 @@ namespace MultronUpdater
                 TokenBox.Password = p.GetToken();
                 FolderBox.Text = p.LocalFolder;
                 ExeBox.Text = p.ExeName;
+                WindowsAppRadio.IsChecked = !p.IsConsoleApp;
+                ConsoleAppRadio.IsChecked = p.IsConsoleApp;
+                ArgsBox.Text = p.StartArguments;
+                ConsoleHiddenRadio.IsChecked = p.HideConsole;
+                ConsoleKeepRadio.IsChecked = !p.HideConsole && p.KeepConsoleOpen;
+                ConsoleShowRadio.IsChecked = !p.HideConsole && !p.KeepConsoleOpen;
+                ConsoleOptions.Visibility = p.IsConsoleApp ? Visibility.Visible : Visibility.Collapsed;
+                UpdateDetectedType();
                 RestartCheck.IsChecked = p.RestartAfterUpdate;
                 EdgeCheck.IsChecked = p.RefreshEdgeAfterUpdate;
                 BackupCheck.IsChecked = p.KeepBackup;
@@ -152,6 +165,10 @@ namespace MultronUpdater
             p.SetToken(TokenBox.Password);
             p.LocalFolder = FolderBox.Text.Trim();
             p.ExeName = ExeBox.Text.Trim();
+            p.IsConsoleApp = ConsoleAppRadio.IsChecked == true;
+            p.StartArguments = ArgsBox.Text.Trim();
+            p.HideConsole = ConsoleHiddenRadio.IsChecked == true;
+            p.KeepConsoleOpen = ConsoleKeepRadio.IsChecked == true;
             p.RestartAfterUpdate = RestartCheck.IsChecked == true;
             p.RefreshEdgeAfterUpdate = EdgeCheck.IsChecked == true;
             p.KeepBackup = BackupCheck.IsChecked == true;
@@ -416,6 +433,58 @@ namespace MultronUpdater
                 FolderBox.Text = Path.GetDirectoryName(file)!;
                 ExeBox.Text = Path.GetFileName(file);
             }
+
+            if (ProgramRunner.IsConsoleExe(file) is bool console)
+            {
+                WindowsAppRadio.IsChecked = !console;
+                ConsoleAppRadio.IsChecked = console;
+                ScheduleAutoSave();
+            }
+        }
+
+        private void ProgramType_Changed(object sender, RoutedEventArgs e)
+        {
+            if (ConsoleOptions == null) return;
+            ConsoleOptions.Visibility = ConsoleAppRadio.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void UpdateDetectedType()
+        {
+            if (DetectedTypeText == null) return;
+            string? path = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(FolderBox.Text) && !string.IsNullOrWhiteSpace(ExeBox.Text))
+                    path = Path.Combine(FolderBox.Text.Trim(), ExeBox.Text.Trim());
+            }
+            catch { }
+            var detected = path != null && File.Exists(path) ? ProgramRunner.IsConsoleExe(path) : null;
+            DetectedTypeText.Text = detected switch
+            {
+                true => "(the selected .exe is a console app)",
+                false => "(the selected .exe is a Windows app)",
+                _ => ""
+            };
+        }
+
+        private void StartNow_Click(object sender, RoutedEventArgs e)
+        {
+            if (_current == null) return;
+            _autoSave.Stop();
+            if (!SaveForm(showConfirmation: false)) return;
+            var exe = ProgramRunner.ExePath(_current);
+            if (exe == null) { ShowWarning("Choose the target folder and the program (.exe) first."); return; }
+            if (!File.Exists(exe)) { ShowWarning($"The program does not exist yet:\n{exe}"); return; }
+            ProgramRunner.Start(_current, exe);
+            SetStatus($"Started {Path.GetFileName(exe)}", null);
+        }
+
+        private void OpenConsoleLog_Click(object sender, RoutedEventArgs e)
+        {
+            if (_current == null) return;
+            var file = ProgramRunner.ConsoleLogFile(_current);
+            if (File.Exists(file)) OpenPath(file);
+            else ShowWarning("There is no console log yet. It is created when the program runs hidden.");
         }
 
         private void OpenFolder_Click(object sender, RoutedEventArgs e)

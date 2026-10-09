@@ -14,6 +14,7 @@ Built with C# / WPF on .NET 8.
 - **Multiple targets** – add as many repo → program pairs as you like, each with its own settings. Enable, duplicate or remove them from the list.
 - **GitHub as the update source** – pick any owner, repository, branch and path (a single file or a whole folder).
 - **After-update actions per target** – start the program again and/or refresh the active Microsoft Edge tab (F5).
+- **Windows and console programs** – start arguments, and for console apps: show the window, keep it open after exit, or run hidden with the output written to a log file. Console apps are closed with Ctrl+C before an update.
 - **Paste-a-link setup** – paste a GitHub link and the fields fill themselves in.
 - **Safe update flow** – download → verify → close the program → replace files → restart.
   If replacing fails, the previous version is restored automatically.
@@ -46,6 +47,21 @@ Built with C# / WPF on .NET 8.
 5. **After updating** – choose whether to start the program again and/or refresh the active Edge tab.
 6. Click **Check this target** to run the first update. Repeat for more targets.
 7. In the **General** tab, turn on **Update automatically** to keep every enabled target updated in the background.
+
+### Console programs
+
+In **Program on this computer**, choose **Console app** (it is detected automatically when you pick the
+`.exe` with **Browse...**) and, optionally, **Start arguments** such as `--port 8080 --silent`. Then choose
+how the console window behaves:
+
+| Option | What happens |
+|---|---|
+| Show the console window | The program opens in its own console window. |
+| Show it and keep it open after the program exits | Runs inside `cmd /k`, so the window stays open to read errors. |
+| Run hidden in the background | No window; output and errors go to `%AppData%\MultronUpdater\console-logs\<target>.log` (**Open console log**). |
+
+Before replacing files, Multron Updater sends **Ctrl+C** so the program can shut down cleanly and terminates it
+only if it is still running after 5 seconds. Use **Start now** to try the settings without waiting for an update.
 
 ### File groups
 
@@ -94,6 +110,7 @@ Targets are checked one after another.
 | Settings | `%AppData%\MultronUpdater\settings.json` |
 | Log file | `%AppData%\MultronUpdater\log.txt` |
 | Backups | `%AppData%\MultronUpdater\backups\<target id>\` |
+| Console output (hidden console apps) | `%AppData%\MultronUpdater\console-logs\` |
 
 ## GitHub rate limit
 

@@ -194,12 +194,12 @@ namespace MultronUpdater.Services
             Report(p, UpdateStage.Downloading, "Download complete", changed.Count, changed.Count, total, total);
             Logger.Info($"[{name}] {changed.Count} file(s) downloaded and verified.");
 
-            string? exePath = string.IsNullOrWhiteSpace(p.ExeName) ? null : Path.Combine(Path.GetFullPath(p.LocalFolder), p.ExeName);
+            string? exePath = ProgramRunner.ExePath(p);
             bool wasRunning = false;
             if (exePath != null && closeProgram)
             {
                 Report(p, UpdateStage.Closing, $"Closing {Path.GetFileName(exePath)}...");
-                wasRunning = await CloseProcessAsync(exePath, name);
+                wasRunning = await ProgramRunner.CloseAsync(p, exePath);
             }
 
             var backup = Path.Combine(AppSettings.DataFolder, "backups", p.Id, DateTime.Now.ToString("yyyyMMdd_HHmmss"));
@@ -229,7 +229,7 @@ namespace MultronUpdater.Services
                 {
                     try { if (bak != null) File.Copy(bak, local, true); else File.Delete(local); } catch { }
                 }
-                if (exePath != null && wasRunning) StartProgram(exePath, name);
+                if (exePath != null && wasRunning) ProgramRunner.Start(p, exePath);
                 throw;
             }
             finally
@@ -247,7 +247,7 @@ namespace MultronUpdater.Services
             if (exePath != null && restartProgram)
             {
                 Report(p, UpdateStage.Starting, $"Starting {Path.GetFileName(exePath)}...");
-                StartProgram(exePath, name);
+                ProgramRunner.Start(p, exePath);
             }
 
             if (refreshEdge)
@@ -260,54 +260,6 @@ namespace MultronUpdater.Services
 
         private static string StagingPath(string staging, RemoteFile f) =>
             Path.Combine(staging, f.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-
-        public static async Task<bool> CloseProcessAsync(string exePath, string profileName)
-        {
-            var name = Path.GetFileNameWithoutExtension(exePath);
-            var procs = Process.GetProcessesByName(name).Where(p => p.Id != Environment.ProcessId && IsSameExe(p, exePath)).ToList();
-            if (procs.Count == 0) { Logger.Info($"[{profileName}] {name} is not running."); return false; }
-
-            Logger.Info($"[{profileName}] Closing {name} ({procs.Count} process(es))...");
-            foreach (var p in procs) { try { p.CloseMainWindow(); } catch { } }
-
-            for (int t = 0; t < 50 && procs.Any(p => !HasExited(p)); t++) await Task.Delay(100);
-
-            foreach (var p in procs.Where(p => !HasExited(p)))
-            {
-                try { p.Kill(entireProcessTree: true); Logger.Warn($"[{profileName}] {name} did not close in time and was terminated."); }
-                catch (Win32Exception ex) { throw new InvalidOperationException($"Could not close {name}: {ex.Message}"); }
-            }
-            foreach (var p in procs) { try { p.WaitForExit(10000); } catch { } p.Dispose(); }
-            await Task.Delay(500);
-            return true;
-        }
-
-        private static bool HasExited(Process p) { try { return p.HasExited; } catch { return true; } }
-
-        private static bool IsSameExe(Process p, string exePath)
-        {
-            try
-            {
-                var path = p.MainModule?.FileName;
-                return path == null || string.Equals(Path.GetFullPath(path), Path.GetFullPath(exePath), StringComparison.OrdinalIgnoreCase);
-            }
-            catch { return true; }
-        }
-
-        public static void StartProgram(string exePath, string profileName)
-        {
-            if (!File.Exists(exePath)) { Logger.Warn($"[{profileName}] Cannot start, file not found: {exePath}"); return; }
-            try
-            {
-                Process.Start(new ProcessStartInfo(exePath)
-                {
-                    UseShellExecute = true,
-                    WorkingDirectory = Path.GetDirectoryName(exePath)!
-                });
-                Logger.Info($"[{profileName}] Started {Path.GetFileName(exePath)}.");
-            }
-            catch (Exception ex) { Logger.Error($"[{profileName}] Could not start the program: " + ex.Message); }
-        }
 
         private static async Task RetryAsync(Action action, CancellationToken ct)
         {
