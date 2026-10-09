@@ -154,6 +154,9 @@ namespace MultronUpdater.Services
         public bool StartWithWindows { get; set; } = false;
         public bool StartMinimized { get; set; } = true;
 
+        public bool SelfUpdateEnabled { get; set; } = true;
+        public DateTime? LastSelfUpdateCheck { get; set; }
+
         public bool HasConfiguredProfile()
         {
             foreach (var p in Profiles)

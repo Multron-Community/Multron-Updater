@@ -71,7 +71,7 @@ namespace MultronUpdater
             foreach (var box in new[] { NameBox, OwnerBox, RepoBox, BranchBox, RepoPathBox, FolderBox, ExeBox, IntervalBox })
                 box.TextChanged += (_, _) => ScheduleAutoSave();
             TokenBox.PasswordChanged += (_, _) => ScheduleAutoSave();
-            foreach (var check in new[] { EnabledCheck, RestartCheck, EdgeCheck, BackupCheck, OnlyFilesCheck, NotifyCheck, MinimizedCheck, StartupCheck })
+            foreach (var check in new[] { EnabledCheck, RestartCheck, EdgeCheck, BackupCheck, OnlyFilesCheck, NotifyCheck, MinimizedCheck, StartupCheck, SelfUpdateCheck })
                 check.Click += (_, _) => ScheduleAutoSave();
 
             _autoSave.Tick += (_, _) => { _autoSave.Stop(); SaveForm(showConfirmation: false, silent: true); };
@@ -102,6 +102,7 @@ namespace MultronUpdater
                 IntervalBox.Text = s.CheckIntervalMinutes.ToString();
                 NotifyCheck.IsChecked = s.NotifyOnUpdate;
                 MinimizedCheck.IsChecked = s.StartMinimized;
+                SelfUpdateCheck.IsChecked = s.SelfUpdateEnabled;
                 try { StartupCheck.IsChecked = StartupHelper.IsEnabled(); }
                 catch { StartupCheck.IsChecked = s.StartWithWindows; }
             }
@@ -177,6 +178,7 @@ namespace MultronUpdater
             s.AutoUpdateEnabled = AutoToggle.IsChecked == true;
             s.NotifyOnUpdate = NotifyCheck.IsChecked == true;
             s.StartMinimized = MinimizedCheck.IsChecked == true;
+            s.SelfUpdateEnabled = SelfUpdateCheck.IsChecked == true;
             s.StartWithWindows = StartupCheck.IsChecked == true;
             return true;
         }
@@ -791,6 +793,16 @@ namespace MultronUpdater
             BusyBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
             CheckAllButton.IsEnabled = CheckButton.IsEnabled = ForceButton.IsEnabled = !busy;
             if (!busy) StatusDetail.Text = BuildDetail();
+
+            VersionText.Text = $"Version {SelfUpdater.CurrentVersion}";
+            var selfStatus = AppInstance.SelfUpdateStatus;
+            if (string.IsNullOrEmpty(selfStatus))
+                selfStatus = s.LastSelfUpdateCheck is { } lsc ? $"Last checked {lsc:yyyy-MM-dd HH:mm}." : "Not checked yet.";
+            SelfStatusText.Text = selfStatus;
+            SelfInstallButton.Visibility = AppInstance.AvailableUpdate != null && SelfUpdater.CanUpdateItself(out _)
+                ? Visibility.Visible : Visibility.Collapsed;
+            SelfInstallButton.Content = AppInstance.AvailableUpdate != null ? $"Install {AppInstance.AvailableUpdate.Version}" : "Install update";
+            SelfInstallButton.IsEnabled = SelfCheckButton.IsEnabled = !AppInstance.IsSelfUpdating;
         }
 
         private void AddLog(LogEntry e)
@@ -831,6 +843,22 @@ namespace MultronUpdater
         private void ClearLogs_Click(object sender, RoutedEventArgs e) => _logs.Clear();
 
         private void OpenLogFile_Click(object sender, RoutedEventArgs e) => AppInstance.OpenLogFile();
+
+        private async void SelfCheck_Click(object sender, RoutedEventArgs e) => await AppInstance.CheckSelfUpdateAsync(manual: true);
+
+        private async void SelfInstall_Click(object sender, RoutedEventArgs e)
+        {
+            var release = AppInstance.AvailableUpdate;
+            if (release == null) return;
+            if (MessageBox.Show(this, $"Update Multron Updater from {SelfUpdater.CurrentVersion} to {release.Version}?\n\nIt will restart after the update.",
+                    "Update Multron Updater", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+            FlushAutoSave();
+            await AppInstance.InstallSelfUpdateAsync();
+        }
+
+        private void SelfReleases_Click(object sender, RoutedEventArgs e) =>
+            OpenPath($"https://github.com/{SelfUpdater.Owner}/{SelfUpdater.Repo}/releases");
 
         private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
         {

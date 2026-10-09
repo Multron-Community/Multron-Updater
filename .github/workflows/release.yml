@@ -1,0 +1,56 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Work out the version
+        id: version
+        shell: pwsh
+        run: |
+          $xml = [xml](Get-Content MultronUpdater.csproj)
+          $base = @($xml.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ })[0]
+          $parts = $base.Split('.')
+          $version = "$($parts[0]).$($parts[1]).${{ github.run_number }}"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+
+      - name: Publish single-file exe
+        run: dotnet publish MultronUpdater.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Create release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $notes = if ($env:COMMIT_MESSAGE) { $env:COMMIT_MESSAGE } else { "Manual build of ${{ github.sha }}" }
+          Set-Content -Path notes.md -Value $notes -Encoding utf8
+          gh release create "v$version" publish/MultronUpdater.exe `
+            --title "Multron Updater $version" `
+            --notes-file notes.md `
+            --target "${{ github.sha }}" `
+            --latest

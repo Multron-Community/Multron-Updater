@@ -24,6 +24,13 @@ namespace MultronUpdater
         private DownloadToast? _toast;
         private bool _toastSuppressed;
         private readonly DispatcherTimer _autoTimer = new();
+        private readonly DispatcherTimer _selfTimer = new() { Interval = TimeSpan.FromHours(3) };
+        private bool _selfWarned;
+
+        public SelfUpdater SelfUpdate { get; } = new();
+        public ReleaseInfo? AvailableUpdate { get; private set; }
+        public bool IsSelfUpdating { get; private set; }
+        public string SelfUpdateStatus { get; private set; } = "";
 
         public static new App Current => (App)Application.Current;
 
@@ -41,7 +48,14 @@ namespace MultronUpdater
         {
             base.OnStartup(e);
 
+            bool justUpdated = e.Args.Contains("--updated", StringComparer.OrdinalIgnoreCase);
+            bool trayArg = e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase);
             _mutex = new Mutex(true, MutexName, out bool isFirst);
+            if (!isFirst && justUpdated)
+            {
+                try { isFirst = _mutex.WaitOne(TimeSpan.FromSeconds(20)); }
+                catch (AbandonedMutexException) { isFirst = true; }
+            }
             _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
             if (!isFirst)
             {
@@ -62,7 +76,8 @@ namespace MultronUpdater
             TaskScheduler.UnobservedTaskException += (_, ex) => { Logger.Error("Background error: " + ex.Exception.GetBaseException().Message); ex.SetObserved(); };
 
             Settings = AppSettings.Load();
-            Logger.Info($"Multron Updater started ({Settings.Profiles.Count} target(s)).");
+            Logger.Info($"Multron Updater {SelfUpdater.CurrentVersion} started ({Settings.Profiles.Count} target(s)).");
+            SelfUpdater.CleanupOldVersion();
 
             System.Drawing.Icon appIcon;
             using (var s = GetResourceStream(new Uri("pack://application:,,,/Assets/app.ico"))!.Stream)
@@ -76,10 +91,10 @@ namespace MultronUpdater
             _tray.ExitRequested += ExitApp;
 
             Updater.Progress += p => Dispatcher.BeginInvoke(() => OnProgress(p));
+            SelfUpdate.Progress += p => Dispatcher.BeginInvoke(() => OnProgress(p));
 
             _main = new MainWindow();
-            bool launchedHidden = e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase)
-                                  && Settings.StartMinimized && Settings.HasConfiguredProfile();
+            bool launchedHidden = trayArg && (justUpdated || (Settings.StartMinimized && Settings.HasConfiguredProfile()));
             if (!launchedHidden) ShowMainWindow();
 
             _autoTimer.Tick += async (_, _) =>
@@ -88,6 +103,104 @@ namespace MultronUpdater
                 await RunCheckAsync(null, force: false, manual: false);
             };
             ApplyAutoUpdate(checkSoon: true);
+
+            if (justUpdated)
+            {
+                Logger.Success($"Multron Updater was updated to version {SelfUpdater.CurrentVersion}.");
+                _tray.ShowBalloon("Multron Updater", $"Updated to version {SelfUpdater.CurrentVersion}.");
+            }
+
+            _selfTimer.Tick += async (_, _) => await CheckSelfUpdateAsync(manual: false);
+            _selfTimer.Start();
+            var firstSelfCheck = new DispatcherTimer { Interval = TimeSpan.FromSeconds(20) };
+            firstSelfCheck.Tick += async (_, _) => { firstSelfCheck.Stop(); await CheckSelfUpdateAsync(manual: false); };
+            firstSelfCheck.Start();
+        }
+
+        public async Task CheckSelfUpdateAsync(bool manual)
+        {
+            if (IsSelfUpdating) return;
+            if (manual) Logger.Info("Checking for Multron Updater updates...");
+            SelfUpdateStatus = "Checking for updates...";
+            StateChanged?.Invoke();
+            try
+            {
+                var release = await Task.Run(() => SelfUpdate.GetLatestReleaseAsync());
+                Settings.LastSelfUpdateCheck = DateTime.Now;
+                SaveSettings();
+
+                if (release == null)
+                {
+                    AvailableUpdate = null;
+                    SelfUpdateStatus = "No release has been published yet.";
+                    if (manual) Logger.Info("Multron Updater: no release has been published on GitHub yet.");
+                }
+                else if (release.Version > SelfUpdater.CurrentVersion)
+                {
+                    bool firstTime = AvailableUpdate?.Version != release.Version;
+                    AvailableUpdate = release;
+                    SelfUpdateStatus = $"Version {release.Version} is available.";
+                    if (firstTime || manual) Logger.Info($"Multron Updater {release.Version} is available (you have {SelfUpdater.CurrentVersion}).");
+
+                    if (!SelfUpdater.CanUpdateItself(out var reason))
+                    {
+                        SelfUpdateStatus += " " + reason;
+                        if (!_selfWarned || manual) Logger.Warn("Multron Updater cannot update itself: " + reason);
+                        _selfWarned = true;
+                    }
+                    else if (Settings.SelfUpdateEnabled && !manual)
+                    {
+                        await InstallSelfUpdateAsync();
+                    }
+                    else if (firstTime && !manual)
+                    {
+                        _tray?.ShowBalloon("Multron Updater", $"Version {release.Version} is available. Open Multron Updater to install it.");
+                    }
+                }
+                else
+                {
+                    AvailableUpdate = null;
+                    SelfUpdateStatus = $"Up to date (latest release {release.Version}).";
+                    if (manual) Logger.Info($"Multron Updater is up to date ({SelfUpdater.CurrentVersion}).");
+                }
+            }
+            catch (Exception ex)
+            {
+                SelfUpdateStatus = "Could not check: " + ex.Message;
+                if (manual) Logger.Error(ex.Message); else Logger.Warn(ex.Message);
+            }
+            StateChanged?.Invoke();
+        }
+
+        public async Task InstallSelfUpdateAsync()
+        {
+            var release = AvailableUpdate;
+            if (release == null || IsSelfUpdating) return;
+
+            for (int i = 0; i < 300 && IsChecking; i++) await Task.Delay(2000);
+            if (IsChecking) return;
+
+            IsSelfUpdating = true;
+            SelfUpdateStatus = $"Installing version {release.Version}...";
+            StateChanged?.Invoke();
+            Logger.Info($"Updating Multron Updater {SelfUpdater.CurrentVersion} → {release.Version}...");
+            try
+            {
+                await Task.Run(() => SelfUpdate.InstallAsync(release));
+                OnProgress(new UpdateProgress(SelfUpdater.ProgressId, SelfUpdater.DisplayName, UpdateStage.Completed,
+                    $"Version {release.Version} installed, restarting..."));
+                bool hidden = _main == null || !_main.IsVisible;
+                SelfUpdater.Restart(hidden);
+                ExitApp();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex.Message);
+                SelfUpdateStatus = "Update failed: " + ex.Message;
+                OnProgress(new UpdateProgress(SelfUpdater.ProgressId, SelfUpdater.DisplayName, UpdateStage.Failed, ex.Message));
+                IsSelfUpdating = false;
+                StateChanged?.Invoke();
+            }
         }
 
         public void ApplyAutoUpdate(bool checkSoon)
@@ -292,6 +405,7 @@ namespace MultronUpdater
         protected override void OnExit(ExitEventArgs e)
         {
             Updater.Dispose();
+            SelfUpdate.Dispose();
             _tray?.Dispose();
             try { _mutex?.ReleaseMutex(); } catch { }
             _mutex?.Dispose();

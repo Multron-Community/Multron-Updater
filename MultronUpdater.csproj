@@ -11,7 +11,7 @@
     <AssemblyName>MultronUpdater</AssemblyName>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.0</Version>
+    <Version>1.2.0</Version>
     <Product>Multron Updater</Product>
     <AssemblyTitle>Multron Updater</AssemblyTitle>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

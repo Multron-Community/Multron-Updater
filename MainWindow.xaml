@@ -476,6 +476,31 @@
                                            Text="Settings are saved automatically as you change them."/>
                             </StackPanel>
                         </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="Multron Updater updates" Style="{StaticResource CardTitle}"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock x:Name="VersionText" FontWeight="SemiBold" FontSize="13.5"/>
+                                        <TextBlock x:Name="SelfStatusText" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button x:Name="SelfInstallButton" Content="Install update" Style="{StaticResource PrimaryButton}"
+                                                Margin="0,0,8,0" Visibility="Collapsed" Click="SelfInstall_Click"/>
+                                        <Button x:Name="SelfCheckButton" Content="Check for updates" Margin="0,0,8,0" Click="SelfCheck_Click"/>
+                                        <Button Content="Releases" Click="SelfReleases_Click" ToolTip="Open the releases page on GitHub"/>
+                                    </StackPanel>
+                                </Grid>
+                                <CheckBox x:Name="SelfUpdateCheck" Content="Update Multron Updater automatically" Margin="0,12,0,0"/>
+                                <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
+                                           Text="New versions come from the Releases of github.com/Multron-Community/Multron-Updater. Every push to the main branch builds a new release. The download is verified, the program replaces itself and starts again."/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

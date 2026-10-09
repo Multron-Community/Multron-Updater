@@ -26,6 +26,7 @@ Built with C# / WPF on .NET 8.
 - **Private repositories** – optional personal access token, stored encrypted (Windows DPAPI) for the current user.
 - **Start with Windows** – registered as a logon task, so it starts without a UAC prompt.
 - **Auto-saving settings** – every change is saved as you type.
+- **Updates itself** – every push to `main` builds a new release, and Multron Updater installs it and restarts.
 
 ## Requirements
 
@@ -35,7 +36,7 @@ Built with C# / WPF on .NET 8.
 
 ## Getting started
 
-1. Download `MultronUpdater.exe` and run it.
+1. Download `MultronUpdater.exe` from the [latest release](https://github.com/Multron-Community/Multron-Updater/releases/latest) and run it.
 2. In the **Targets** tab, select a target (or click **+ Add**) and give it a name.
 3. **GitHub source** – paste a link such as
    `https://github.com/user/repo/blob/main/bin/Release/App.exe` and click **Fill from link**,
@@ -99,6 +100,19 @@ Targets are checked one after another.
 Without a token GitHub allows 60 API requests per hour. Unchanged checks are free (HTTP 304),
 so a 5-minute interval works fine. If you hit the limit, or the repository is private, add a
 personal access token (read-only *Contents* permission is enough).
+
+## Updating Multron Updater itself
+
+1. A push to the `main` branch starts the **Build and release** GitHub Actions workflow
+   (`.github/workflows/release.yml`). Pushes that only change `*.md`, `LICENSE` or `.gitignore` are skipped.
+2. The workflow builds the single-file exe and publishes it as a release named `v<major>.<minor>.<run number>`.
+   Major and minor come from `<Version>` in `MultronUpdater.csproj`, so change it there to start a new series (e.g. `1.2.0`).
+3. Multron Updater checks the latest release 20 seconds after it starts and then every 3 hours
+   (or on **General → Check for updates**). When a newer version exists it downloads it, checks its size
+   and SHA-256, swaps its own exe and restarts in the same state (window open or in the tray).
+
+Turn off **Update Multron Updater automatically** in the **General** tab to only get a notification
+and install the update with the **Install** button. Development builds (running from `bin\`) never update themselves.
 
 ## Building from source
 
