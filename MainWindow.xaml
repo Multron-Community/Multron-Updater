@@ -215,6 +215,38 @@
                                     <TextBlock Style="{StaticResource Hint}"
                                                Text="A single file (bin/Release/App.exe) or a folder (bin/Release). With a folder, every file inside it is kept in sync."/>
 
+                                    <TextBlock Text="Update source" Style="{StaticResource FieldLabel}" Margin="0,10,0,4"/>
+                                    <StackPanel>
+                                        <RadioButton x:Name="SourceBothRadio" GroupName="UpdateSource" Margin="0,2,0,0" Checked="Source_Changed">
+                                            <TextBlock TextWrapping="Wrap"><Run Text="Repository files + releases" FontWeight="SemiBold"/><Run Text="  (default) – sees a push right away; new releases add the files the repository does not have" Foreground="#656D76"/></TextBlock>
+                                        </RadioButton>
+                                        <RadioButton x:Name="SourceRepoRadio" GroupName="UpdateSource" Margin="0,4,0,0" Checked="Source_Changed">
+                                            <TextBlock TextWrapping="Wrap"><Run Text="Repository files only" FontWeight="SemiBold"/><Run Text="  – raw files from the branch, checked with their hash; a &lt;file&gt;.sha256 next to a file is verified too" Foreground="#656D76"/></TextBlock>
+                                        </RadioButton>
+                                        <RadioButton x:Name="SourceReleasesRadio" GroupName="UpdateSource" Margin="0,4,0,0" Checked="Source_Changed">
+                                            <TextBlock TextWrapping="Wrap"><Run Text="Releases only" FontWeight="SemiBold"/><Run Text="  – installs the files of the latest GitHub release, verified with SHA-256" Foreground="#656D76"/></TextBlock>
+                                        </RadioButton>
+                                    </StackPanel>
+
+                                    <Border x:Name="ReleaseOptions" Background="#F6F8FA" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                            CornerRadius="6" Padding="12,8" Margin="0,10,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Release file(s) to install" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="AssetBox" FontFamily="Cascadia Mono, Consolas"
+                                                         ToolTip="File name of the release asset. Wildcards and several names: MyApp-*.zip;Readme.txt"/>
+                                                <Button Grid.Column="1" x:Name="CheckReleaseButton" Content="Show latest release" Margin="8,0,0,0" Click="ShowRelease_Click"/>
+                                            </Grid>
+                                            <TextBlock x:Name="AssetHint" Style="{StaticResource Hint}"/>
+                                            <CheckBox x:Name="ExtractZipCheck" Content="Extract .zip files into the target folder" Margin="0,8,0,0"/>
+                                            <TextBlock x:Name="ReleaseInfoText" Style="{StaticResource Hint}" Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+
                                     <TextBlock Text="Access token (optional)" Style="{StaticResource FieldLabel}"/>
                                     <PasswordBox x:Name="TokenBox"/>
                                     <TextBlock Style="{StaticResource Hint}"

@@ -292,6 +292,9 @@ namespace MultronUpdater
                     {
                         if (snapshot.LastCommitSha != null) live.LastCommitSha = snapshot.LastCommitSha;
                         if (snapshot.LastUpdateTime != null) live.LastUpdateTime = snapshot.LastUpdateTime;
+                        live.InstalledReleaseTag = snapshot.InstalledReleaseTag;
+                        live.InstalledReleaseDigest = snapshot.InstalledReleaseDigest;
+                        live.InstalledReleaseFiles = snapshot.InstalledReleaseFiles;
                     }
                     if (result == UpdateResult.Updated) updatedNames.Add(target.DisplayName);
                     if (result == UpdateResult.Failed) overall = UpdateResult.Failed;

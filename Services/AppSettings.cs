@@ -26,6 +26,8 @@ namespace MultronUpdater.Services
         public List<TrackedFile> Files { get; set; } = new();
     }
 
+    public enum TargetSource { Both, Repository, Releases }
+
     public class UpdateProfile : INotifyPropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -45,6 +47,16 @@ namespace MultronUpdater.Services
         public string Branch { get; set; } = "main";
         public string RepoPath { get; set; } = "";
         public string? EncryptedToken { get; set; }
+
+        public TargetSource Source { get; set; } = TargetSource.Both;
+        public string ReleaseAsset { get; set; } = "";
+        public bool ExtractZipAssets { get; set; } = true;
+        public string? InstalledReleaseTag { get; set; }
+        public string? InstalledReleaseDigest { get; set; }
+        public List<string> InstalledReleaseFiles { get; set; } = new();
+
+        [JsonIgnore] public bool UsesRepository => Source != TargetSource.Releases;
+        [JsonIgnore] public bool UsesReleases => Source != TargetSource.Repository;
 
         public string LocalFolder { get; set; } = "";
         public string ExeName { get; set; } = "";
@@ -102,7 +114,16 @@ namespace MultronUpdater.Services
             : $"{Owner}/{Repo} · {Branch}";
 
         [JsonIgnore]
-        public string SourceKey => $"{Owner}/{Repo}@{Branch}:{RepoPath}>{LocalFolder}".ToLowerInvariant();
+        public string SourceKey => $"{Owner}/{Repo}@{Branch}:{RepoPath}>{LocalFolder}|{Source}|{ReleaseAsset}|{ExtractZipAssets}".ToLowerInvariant();
+
+        public string EffectiveAssetPattern()
+        {
+            if (!string.IsNullOrWhiteSpace(ReleaseAsset)) return ReleaseAsset.Trim();
+            if (!string.IsNullOrWhiteSpace(ExeName)) return System.IO.Path.GetFileName(ExeName.Trim());
+            var name = RepoPath.Replace('\\', '/').Trim('/');
+            name = name.Contains('/') ? name[(name.LastIndexOf('/') + 1)..] : name;
+            return name.Contains('.') ? name : "";
+        }
 
         public string GetToken()
         {
@@ -126,8 +147,8 @@ namespace MultronUpdater.Services
         public bool IsConfigured(out string error)
         {
             if (string.IsNullOrWhiteSpace(Owner) || string.IsNullOrWhiteSpace(Repo)) { error = "GitHub owner/repository is empty."; return false; }
-            if (string.IsNullOrWhiteSpace(Branch)) { error = "Branch is empty."; return false; }
-            if (string.IsNullOrWhiteSpace(RepoPath)) { error = "Path in repository is empty."; return false; }
+            if (UsesRepository && string.IsNullOrWhiteSpace(Branch)) { error = "Branch is empty."; return false; }
+            if (UsesRepository && string.IsNullOrWhiteSpace(RepoPath)) { error = "Path in repository is empty."; return false; }
             if (string.IsNullOrWhiteSpace(LocalFolder)) { error = "Local target folder is empty."; return false; }
             error = "";
             return true;

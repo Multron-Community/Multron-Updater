@@ -48,6 +48,24 @@ Built with C# / WPF on .NET 8.
 6. Click **Check this target** to run the first update. Repeat for more targets.
 7. In the **General** tab, turn on **Update automatically** to keep every enabled target updated in the background.
 
+### Update source
+
+Each target chooses where updates come from (**GitHub source → Update source**):
+
+| Option | What it does |
+|---|---|
+| **Repository files + releases** (default) | Files under *Path in repository* are kept in sync with the branch, so a push is seen right away. New releases install the files the repository does not have; a file that exists in both is taken from the repository. |
+| **Repository files only** | Raw files from the branch. Each file is checked with its git hash; if a `<file>.sha256` sits next to it in the repository, the SHA-256 is verified too. |
+| **Releases only** | Installs the file(s) of the latest GitHub release, verified with the SHA-256 GitHub publishes for every asset. |
+
+**Release file(s) to install** takes a file name, wildcards (`MyApp-*-win64.zip`) or several names separated by `;`.
+When it is empty, the name of the program (or of the file in *Path in repository*) is used. A single `.exe` asset is installed
+under the program's name, and `.zip` assets are extracted into the target folder (a single top folder inside the zip is skipped).
+**Show latest release** lists the files of the latest release and marks the ones that match.
+
+Checking for a new commit or a new release tag does not use the GitHub API, so frequent checks do not run into the
+60 requests/hour limit; the API is only called when something actually changed.
+
 ### Console programs
 
 In **Program on this computer**, choose **Console app** (it is detected automatically when you pick the

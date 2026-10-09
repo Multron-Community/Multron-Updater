@@ -73,9 +73,14 @@ namespace MultronUpdater
             TokenBox.PasswordChanged += (_, _) => ScheduleAutoSave();
             foreach (var check in new[] { EnabledCheck, RestartCheck, EdgeCheck, BackupCheck, OnlyFilesCheck, NotifyCheck, MinimizedCheck, StartupCheck, SelfUpdateCheck })
                 check.Click += (_, _) => ScheduleAutoSave();
-            foreach (var radio in new[] { WindowsAppRadio, ConsoleAppRadio, ConsoleShowRadio, ConsoleKeepRadio, ConsoleHiddenRadio })
+            foreach (var radio in new[] { WindowsAppRadio, ConsoleAppRadio, ConsoleShowRadio, ConsoleKeepRadio, ConsoleHiddenRadio,
+                                          SourceBothRadio, SourceRepoRadio, SourceReleasesRadio })
                 radio.Click += (_, _) => ScheduleAutoSave();
+            ExtractZipCheck.Click += (_, _) => ScheduleAutoSave();
             ArgsBox.TextChanged += (_, _) => ScheduleAutoSave();
+            AssetBox.TextChanged += (_, _) => { ScheduleAutoSave(); UpdateSourceUi(); };
+            ExeBox.TextChanged += (_, _) => UpdateSourceUi();
+            RepoPathBox.TextChanged += (_, _) => UpdateSourceUi();
             ExeBox.TextChanged += (_, _) => UpdateDetectedType();
             FolderBox.TextChanged += (_, _) => UpdateDetectedType();
 
@@ -138,6 +143,13 @@ namespace MultronUpdater
                 ConsoleShowRadio.IsChecked = !p.HideConsole && !p.KeepConsoleOpen;
                 ConsoleOptions.Visibility = p.IsConsoleApp ? Visibility.Visible : Visibility.Collapsed;
                 UpdateDetectedType();
+                SourceBothRadio.IsChecked = p.Source == TargetSource.Both;
+                SourceRepoRadio.IsChecked = p.Source == TargetSource.Repository;
+                SourceReleasesRadio.IsChecked = p.Source == TargetSource.Releases;
+                AssetBox.Text = p.ReleaseAsset;
+                ExtractZipCheck.IsChecked = p.ExtractZipAssets;
+                ReleaseInfoText.Text = p.InstalledReleaseFiles.Count > 0 ? $"Installed release: {p.InstalledReleaseTag}" : "";
+                UpdateSourceUi();
                 RestartCheck.IsChecked = p.RestartAfterUpdate;
                 EdgeCheck.IsChecked = p.RefreshEdgeAfterUpdate;
                 BackupCheck.IsChecked = p.KeepBackup;
@@ -165,6 +177,11 @@ namespace MultronUpdater
             p.SetToken(TokenBox.Password);
             p.LocalFolder = FolderBox.Text.Trim();
             p.ExeName = ExeBox.Text.Trim();
+            p.Source = SourceReleasesRadio.IsChecked == true ? TargetSource.Releases
+                     : SourceRepoRadio.IsChecked == true ? TargetSource.Repository
+                     : TargetSource.Both;
+            p.ReleaseAsset = AssetBox.Text.Trim();
+            p.ExtractZipAssets = ExtractZipCheck.IsChecked == true;
             p.IsConsoleApp = ConsoleAppRadio.IsChecked == true;
             p.StartArguments = ArgsBox.Text.Trim();
             p.HideConsole = ConsoleHiddenRadio.IsChecked == true;
@@ -440,6 +457,55 @@ namespace MultronUpdater
                 ConsoleAppRadio.IsChecked = console;
                 ScheduleAutoSave();
             }
+        }
+
+        private void Source_Changed(object sender, RoutedEventArgs e) => UpdateSourceUi();
+
+        private void UpdateSourceUi()
+        {
+            if (ReleaseOptions == null || SourceRepoRadio == null) return;
+            bool releases = SourceRepoRadio.IsChecked != true;
+            ReleaseOptions.Visibility = releases ? Visibility.Visible : Visibility.Collapsed;
+
+            var probe = new UpdateProfile { ReleaseAsset = AssetBox.Text, ExeName = ExeBox.Text, RepoPath = RepoPathBox.Text };
+            var effective = probe.EffectiveAssetPattern();
+            AssetHint.Text = string.IsNullOrWhiteSpace(AssetBox.Text)
+                ? (effective.Length > 0
+                    ? $"Empty: the release file named '{effective}' is used (from the program / repository path). Wildcards work: MyApp-*.zip"
+                    : "Enter the file name of the release asset, e.g. MyApp.exe or MyApp-*-win64.zip (several: a.exe;b.dll).")
+                : "Wildcards (*, ?) and several names separated by ';' are allowed.";
+        }
+
+        private async void ShowRelease_Click(object sender, RoutedEventArgs e)
+        {
+            if (_current == null) return;
+            _autoSave.Stop();
+            if (!SaveForm(showConfirmation: false)) return;
+            CheckReleaseButton.IsEnabled = false;
+            ReleaseInfoText.Text = "Loading the latest release...";
+            var profile = _current.Clone();
+            try
+            {
+                var release = await System.Threading.Tasks.Task.Run(() => AppInstance.Updater.GetLatestReleaseAsync(profile));
+                if (release == null)
+                {
+                    ReleaseInfoText.Text = $"{profile.Owner}/{profile.Repo} has no published release yet.";
+                    return;
+                }
+                var pattern = profile.EffectiveAssetPattern();
+                var lines = release.Assets.Select(a =>
+                    $"{(pattern.Length > 0 && UpdateService.MatchesPattern(a.Name, pattern) ? "✓" : "  ")} {a.Name}  ({UpdateService.FormatSize(a.Size)}{(a.Sha256 != null ? ", SHA-256" : "")})");
+                ReleaseInfoText.Text = $"Latest release: {release.Tag}{(release.Name.Length > 0 && release.Name != release.Tag ? " – " + release.Name : "")}" +
+                                       (profile.InstalledReleaseFiles.Count > 0 ? $"   ·   installed: {profile.InstalledReleaseTag}" : "") +
+                                       Environment.NewLine + (release.Assets.Count == 0 ? "This release has no files." : string.Join(Environment.NewLine, lines)) +
+                                       (pattern.Length > 0 && !release.Assets.Any(a => UpdateService.MatchesPattern(a.Name, pattern))
+                                           ? Environment.NewLine + $"No file matches '{pattern}'." : "");
+            }
+            catch (Exception ex)
+            {
+                ReleaseInfoText.Text = "Could not load the release: " + ex.Message;
+            }
+            finally { CheckReleaseButton.IsEnabled = true; }
         }
 
         private void ProgramType_Changed(object sender, RoutedEventArgs e)
