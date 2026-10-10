@@ -254,6 +254,14 @@ namespace MultronUpdater.Services
             }
             if (!force && quickTag != null && quickTag == p.InstalledReleaseTag && installedFilesPresent)
                 return new PartResult(false, $"Release {quickTag} is installed", 0);
+            if (!force && quickTag != null && p.InstalledReleaseDigest == null && ProgramVersionMatches(p, quickTag, out var version))
+            {
+                Logger.Info($"[{name}] {p.ExeName} is already version {version}, which is release {quickTag}; nothing to download.");
+                p.InstalledReleaseTag = quickTag;
+                p.InstalledReleaseDigest = "version:" + version;
+                p.InstalledReleaseFiles = new List<string>();
+                return new PartResult(false, $"Release {quickTag} is installed", 0);
+            }
 
             var release = await _github.GetLatestReleaseAsync(p, ct);
             if (release == null)
@@ -462,6 +470,18 @@ namespace MultronUpdater.Services
             foreach (var path in p.AllTrackedPaths().Distinct(StringComparer.OrdinalIgnoreCase))
                 if (!remotePaths.Contains(path)) result.Add(new FileStatus(path, FileState.NotOnGitHub, 0));
             return result;
+        }
+
+        private static bool ProgramVersionMatches(UpdateProfile p, string tag, out string version)
+        {
+            version = "";
+            var exe = ProgramRunner.ExePath(p);
+            if (exe == null || !File.Exists(exe)) return false;
+            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(exe);
+            version = (info.ProductVersion ?? info.FileVersion ?? "").Trim();
+            if (version.Length < 3) return false;
+            var cleanTag = tag.TrimStart('v', 'V');
+            return cleanTag == version || cleanTag.StartsWith(version + "-") || cleanTag.StartsWith(version + "+");
         }
 
         public static bool MatchesPattern(string name, string patterns)

@@ -77,6 +77,7 @@ namespace MultronUpdater
                                           SourceBothRadio, SourceRepoRadio, SourceReleasesRadio })
                 radio.Click += (_, _) => ScheduleAutoSave();
             ExtractZipCheck.Click += (_, _) => ScheduleAutoSave();
+            NoAdminCheck.Click += (_, _) => ScheduleAutoSave();
             ArgsBox.TextChanged += (_, _) => ScheduleAutoSave();
             AssetBox.TextChanged += (_, _) => { ScheduleAutoSave(); UpdateSourceUi(); };
             ExeBox.TextChanged += (_, _) => UpdateSourceUi();
@@ -148,6 +149,7 @@ namespace MultronUpdater
                 SourceReleasesRadio.IsChecked = p.Source == TargetSource.Releases;
                 AssetBox.Text = p.ReleaseAsset;
                 ExtractZipCheck.IsChecked = p.ExtractZipAssets;
+                NoAdminCheck.IsChecked = p.StartWithoutAdmin;
                 ReleaseInfoText.Text = p.InstalledReleaseFiles.Count > 0 ? $"Installed release: {p.InstalledReleaseTag}" : "";
                 UpdateSourceUi();
                 RestartCheck.IsChecked = p.RestartAfterUpdate;
@@ -182,6 +184,7 @@ namespace MultronUpdater
                      : TargetSource.Both;
             p.ReleaseAsset = AssetBox.Text.Trim();
             p.ExtractZipAssets = ExtractZipCheck.IsChecked == true;
+            p.StartWithoutAdmin = NoAdminCheck.IsChecked == true;
             p.IsConsoleApp = ConsoleAppRadio.IsChecked == true;
             p.StartArguments = ArgsBox.Text.Trim();
             p.HideConsole = ConsoleHiddenRadio.IsChecked == true;

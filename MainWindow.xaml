@@ -291,6 +291,10 @@
                                         <TextBlock x:Name="DetectedTypeText" Foreground="{StaticResource MutedBrush}" FontSize="12"
                                                    VerticalAlignment="Center" Margin="16,0,0,0"/>
                                     </StackPanel>
+                                    <CheckBox x:Name="NoAdminCheck" Margin="0,8,0,0"
+                                              Content="Start it as a normal user, without administrator rights (recommended for browsers)"/>
+                                    <TextBlock Style="{StaticResource Hint}"
+                                               Text="Multron Updater runs as administrator. Without this option the programs it starts run as administrator too."/>
 
                                     <TextBlock Text="Start arguments (optional)" Style="{StaticResource FieldLabel}" Margin="0,10,0,3"/>
                                     <Grid>

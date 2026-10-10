@@ -64,6 +64,7 @@ namespace MultronUpdater.Services
         public string StartArguments { get; set; } = "";
         public bool HideConsole { get; set; } = false;
         public bool KeepConsoleOpen { get; set; } = false;
+        public bool StartWithoutAdmin { get; set; } = false;
         public bool RestartAfterUpdate { get; set; } = true;
         public bool RefreshEdgeAfterUpdate { get; set; } = false;
         public bool KeepBackup { get; set; } = true;

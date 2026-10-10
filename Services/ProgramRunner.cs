@@ -48,34 +48,49 @@ namespace MultronUpdater.Services
             if (!File.Exists(exePath)) { Logger.Warn($"[{name}] Cannot start, file not found: {exePath}"); return; }
             var dir = Path.GetDirectoryName(exePath)!;
             var args = p.StartArguments?.Trim() ?? "";
+            var asUser = p.StartWithoutAdmin && ShellUserLauncher.IsElevated ? " as a normal user (without administrator rights)" : "";
             try
             {
                 if (!p.IsConsoleApp)
                 {
-                    Process.Start(new ProcessStartInfo(exePath, args) { UseShellExecute = true, WorkingDirectory = dir });
-                    Logger.Info($"[{name}] Started {Path.GetFileName(exePath)}{ArgsText(args)}.");
+                    Launch(p, exePath, args, dir, noWindow: false);
+                    Logger.Info($"[{name}] Started {Path.GetFileName(exePath)}{ArgsText(args)}{asUser}.");
                 }
                 else if (p.HideConsole)
                 {
                     StartHiddenConsole(p, exePath, args, dir);
+                    Logger.Info($"[{name}] Started {Path.GetFileName(exePath)}{ArgsText(args)} hidden{asUser}; output goes to {ConsoleLogFile(p)}");
                 }
                 else if (p.KeepConsoleOpen)
                 {
                     var command = $"/k \"\"{exePath}\"{(args.Length > 0 ? " " + args : "")}\"";
-                    Process.Start(new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", command)
-                    {
-                        UseShellExecute = true,
-                        WorkingDirectory = dir
-                    });
-                    Logger.Info($"[{name}] Started {Path.GetFileName(exePath)}{ArgsText(args)} in a console window that stays open.");
+                    Launch(p, ComSpec, command, dir, noWindow: false);
+                    Logger.Info($"[{name}] Started {Path.GetFileName(exePath)}{ArgsText(args)} in a console window that stays open{asUser}.");
                 }
                 else
                 {
-                    Process.Start(new ProcessStartInfo(exePath, args) { UseShellExecute = true, WorkingDirectory = dir });
-                    Logger.Info($"[{name}] Started {Path.GetFileName(exePath)}{ArgsText(args)} in a console window.");
+                    Launch(p, exePath, args, dir, noWindow: false);
+                    Logger.Info($"[{name}] Started {Path.GetFileName(exePath)}{ArgsText(args)} in a console window{asUser}.");
                 }
             }
             catch (Exception ex) { Logger.Error($"[{name}] Could not start the program: " + ex.Message); }
+        }
+
+        private static string ComSpec => Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+
+        private static void Launch(UpdateProfile p, string file, string args, string dir, bool noWindow)
+        {
+            if (p.StartWithoutAdmin)
+            {
+                ShellUserLauncher.Start(file, args, dir, noWindow);
+                return;
+            }
+            Process.Start(new ProcessStartInfo(file, args)
+            {
+                UseShellExecute = !noWindow,
+                CreateNoWindow = noWindow,
+                WorkingDirectory = dir
+            })?.Dispose();
         }
 
         private static void StartHiddenConsole(UpdateProfile p, string exePath, string args, string dir)
@@ -93,13 +108,7 @@ namespace MultronUpdater.Services
             catch { }
 
             var command = $"/c \"\"{exePath}\"{(args.Length > 0 ? " " + args : "")} >> \"{logFile}\" 2>&1\"";
-            Process.Start(new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", command)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WorkingDirectory = dir
-            })?.Dispose();
-            Logger.Info($"[{p.DisplayName}] Started {Path.GetFileName(exePath)}{ArgsText(args)} hidden; output goes to {logFile}");
+            Launch(p, ComSpec, command, dir, noWindow: true);
         }
 
         public static async Task<bool> CloseAsync(UpdateProfile profile, string exePath)
