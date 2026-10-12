@@ -323,6 +323,28 @@
                                         </StackPanel>
                                     </Border>
 
+                                    <CheckBox x:Name="ServerMaintCheck" Margin="0,10,0,0"
+                                              Content="Multron server: switch it to &quot;Updating server&quot; maintenance before closing it"/>
+                                    <StackPanel x:Name="ServerMaintPanel" Margin="22,6,0,0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="60"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Server dashboard" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBox x:Name="ServerUrlBox" Grid.Column="1" FontFamily="Cascadia Mono, Consolas"
+                                                     ToolTip="The server's dashboard address on this computer (its --ui address), e.g. http://127.0.0.1:9440"/>
+                                            <TextBlock Grid.Column="2" Text="Wait up to" VerticalAlignment="Center" Margin="12,0,8,0"/>
+                                            <TextBox x:Name="DrainBox" Grid.Column="3" ToolTip="Seconds to wait for scans in progress (0-600)"/>
+                                            <TextBlock Grid.Column="4" Text="s for scans" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                        </Grid>
+                                        <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,0"
+                                                   Text="Clients are told &quot;Under maintenance: the server is being updated&quot; instead of losing the connection without a word, and scans in progress finish first. The updated server starts with scans open again; a normal maintenance mode that was on stays on. If the server is not running, the update goes on as usual."/>
+                                    </StackPanel>
+
                                     <CheckBox x:Name="BackupCheck" Content="Keep a backup of replaced files (last 3 updates)" Margin="0,10,0,0"/>
                                 </StackPanel>
                             </Border>

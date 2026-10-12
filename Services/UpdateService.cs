@@ -383,8 +383,20 @@ namespace MultronUpdater.Services
             bool wasRunning = false;
             if (exePath != null && actions.CloseProgram)
             {
+                ServerMaintenance.Handle? maintenance = null;
+                if (p.ServerMaintenance)
+                {
+                    Report(p, UpdateStage.Closing, "Switching the server to maintenance...");
+                    maintenance = await ServerMaintenance.EnterUpdatingAsync(p, ct);
+                }
                 Report(p, UpdateStage.Closing, $"Closing {Path.GetFileName(exePath)}...");
-                wasRunning = await ProgramRunner.CloseAsync(p, exePath);
+                try { wasRunning = await ProgramRunner.CloseAsync(p, exePath); }
+                catch
+                {
+                    // Still running: do not leave it refusing scans.
+                    await ServerMaintenance.RestoreAsync(p, maintenance);
+                    throw;
+                }
             }
 
             var backup = Path.Combine(AppSettings.DataFolder, "backups", p.Id, DateTime.Now.ToString("yyyyMMdd_HHmmss"));

@@ -69,6 +69,12 @@ namespace MultronUpdater.Services
         public bool RefreshEdgeAfterUpdate { get; set; } = false;
         public bool KeepBackup { get; set; } = true;
 
+        /// <summary>Multron cloud scan server: switch it to "updating server" maintenance before closing it.</summary>
+        public bool ServerMaintenance { get; set; } = false;
+        public string ServerDashboardUrl { get; set; } = "http://127.0.0.1:9440";
+        /// <summary>How long to wait for scans in progress before closing the server.</summary>
+        public int ServerDrainSeconds { get; set; } = 60;
+
         public bool OnlySelectedFiles { get; set; } = false;
         public List<FileGroup> Groups { get; set; } = new();
 
