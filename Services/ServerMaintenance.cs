@@ -97,6 +97,52 @@ namespace MultronUpdater.Services
             return new Handle(baseUrl, previous);
         }
 
+        /// <summary>True when the server's dashboard answers (the server is running).</summary>
+        public static async Task<bool> IsRunningAsync(UpdateProfile p, CancellationToken ct)
+        {
+            try { await GetStatusAsync(BaseUrl(p), ct); return true; }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return false; }
+        }
+
+        /// <summary>
+        /// Asks the running server to reload its signatures and rules from disk
+        /// (POST /api/engine/reload; the verdict cache is cleared). When a reload is
+        /// already running, it waits for it and asks again (up to 2 minutes).
+        /// </summary>
+        public static async Task<bool> ReloadSignaturesAsync(UpdateProfile p, CancellationToken ct)
+        {
+            var name = p.DisplayName;
+            var url = BaseUrl(p) + "/api/engine/reload";
+            var started = DateTime.UtcNow;
+            while (true)
+            {
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent("", Encoding.UTF8, "application/json") };
+                    req.Headers.Add("X-Multron-Dashboard", "1");
+                    using var res = await Http.SendAsync(req, ct);
+                    if (res.IsSuccessStatusCode)
+                    {
+                        Logger.Info($"[{name}] Server signature reload started; the server was not restarted.");
+                        return true;
+                    }
+                    var body = await res.Content.ReadAsStringAsync(ct);
+                    if ((int)res.StatusCode == 409 && DateTime.UtcNow - started < TimeSpan.FromMinutes(2))
+                    {
+                        await Task.Delay(3000, ct);
+                        continue;
+                    }
+                    Logger.Warn($"[{name}] The server refused the signature reload ({(int)res.StatusCode}: {body.Trim()}).");
+                    return false;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    Logger.Warn($"[{name}] Could not ask the server to reload its signatures ({ex.Message}).");
+                    return false;
+                }
+            }
+        }
+
         /// <summary>
         /// Puts the server back into its previous mode when it was not closed after all
         /// (the update stopped before the program was closed).

@@ -74,6 +74,12 @@ namespace MultronUpdater.Services
         public string ServerDashboardUrl { get; set; } = "http://127.0.0.1:9440";
         /// <summary>How long to wait for scans in progress before closing the server.</summary>
         public int ServerDrainSeconds { get; set; } = 60;
+        /// <summary>
+        /// Multron cloud scan server: when an update changes no program files (.exe / .dll),
+        /// the files are replaced while the server keeps running and its signatures are
+        /// reloaded through the dashboard instead of restarting it.
+        /// </summary>
+        public bool ServerReloadSignatures { get; set; } = false;
 
         public bool OnlySelectedFiles { get; set; } = false;
         public List<FileGroup> Groups { get; set; } = new();

@@ -16,6 +16,7 @@ Built with C# / WPF on .NET 8.
 - **After-update actions per target** – start the program again and/or refresh the active Microsoft Edge tab (F5).
 - **Windows and console programs** – start arguments, and for console apps: show the window, keep it open after exit, or run hidden with the output written to a log file. Console apps are closed with Ctrl+C before an update.
 - **Multron server maintenance** – for a Multron / VirusKov cloud scan server target, the server is switched to its "Updating server" maintenance mode through its local dashboard before it is closed: clients are told the server is being updated and scans in progress finish first. The updated server starts with scans open again.
+- **Multron server signature reload** – when an update changes no program files (.exe / .dll), the files are replaced while the server keeps running and its signatures are reloaded through its dashboard instead of restarting it. If a file is held open by the server, it is closed and started as usual.
 - **Paste-a-link setup** – paste a GitHub link and the fields fill themselves in.
 - **Safe update flow** – download → verify → close the program → replace files → restart.
   If replacing fails, the previous version is restored automatically.

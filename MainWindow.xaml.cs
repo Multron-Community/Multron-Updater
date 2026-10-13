@@ -78,6 +78,7 @@ namespace MultronUpdater
                 radio.Click += (_, _) => ScheduleAutoSave();
             ExtractZipCheck.Click += (_, _) => ScheduleAutoSave();
             ServerMaintCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
+            ServerReloadCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
             NoAdminCheck.Click += (_, _) => ScheduleAutoSave();
             ArgsBox.TextChanged += (_, _) => ScheduleAutoSave();
             AssetBox.TextChanged += (_, _) => { ScheduleAutoSave(); UpdateSourceUi(); };
@@ -91,7 +92,7 @@ namespace MultronUpdater
         }
 
         private void UpdateServerMaintUi() =>
-            ServerMaintPanel.Visibility = ServerMaintCheck.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            ServerMaintPanel.Visibility = ServerMaintCheck.IsChecked == true || ServerReloadCheck.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
 
         private void ScheduleAutoSave()
         {
@@ -160,6 +161,7 @@ namespace MultronUpdater
                 EdgeCheck.IsChecked = p.RefreshEdgeAfterUpdate;
                 BackupCheck.IsChecked = p.KeepBackup;
                 ServerMaintCheck.IsChecked = p.ServerMaintenance;
+                ServerReloadCheck.IsChecked = p.ServerReloadSignatures;
                 ServerUrlBox.Text = p.ServerDashboardUrl;
                 DrainBox.Text = p.ServerDrainSeconds.ToString();
                 UpdateServerMaintUi();
@@ -201,6 +203,7 @@ namespace MultronUpdater
             p.RefreshEdgeAfterUpdate = EdgeCheck.IsChecked == true;
             p.KeepBackup = BackupCheck.IsChecked == true;
             p.ServerMaintenance = ServerMaintCheck.IsChecked == true;
+            p.ServerReloadSignatures = ServerReloadCheck.IsChecked == true;
             p.ServerDashboardUrl = string.IsNullOrWhiteSpace(ServerUrlBox.Text) ? "http://127.0.0.1:9440" : ServerUrlBox.Text.Trim();
             if (int.TryParse(DrainBox.Text.Trim(), out var drain)) p.ServerDrainSeconds = Math.Clamp(drain, 0, 600);
             p.OnlySelectedFiles = OnlyFilesCheck.IsChecked == true;

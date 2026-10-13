@@ -376,11 +376,27 @@ namespace MultronUpdater.Services
                 : new PartResult(false, $"Release {release.Tag} is installed", 0);
         }
 
-        private async Task InstallStagedAsync(UpdateProfile p, List<StagedFile> files, AfterActions actions, string staging, CancellationToken ct)
+        /// <summary>Files the running program keeps loaded: updating one needs a restart.</summary>
+        private static bool IsProgramFile(string path) =>
+            path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+
+        private async Task InstallStagedAsync(UpdateProfile p, List<StagedFile> files, AfterActions actions, string staging, CancellationToken ct, bool allowReload = true)
         {
             var name = p.DisplayName;
             string? exePath = ProgramRunner.ExePath(p);
             bool wasRunning = false;
+            var requested = actions;
+
+            // Multron server, no .exe / .dll changed: replace the files while it runs and
+            // reload its signatures instead of closing and restarting it.
+            bool reloadOnly = allowReload && p.ServerReloadSignatures && exePath != null && actions.CloseProgram &&
+                              !files.Any(f => IsProgramFile(f.LocalPath)) && await ServerMaintenance.IsRunningAsync(p, ct);
+            if (reloadOnly)
+            {
+                Logger.Info($"[{name}] No program files changed ({files.Count} file(s)); the server keeps running and reloads its signatures.");
+                actions = actions with { CloseProgram = false, RestartProgram = false };
+            }
+
             if (exePath != null && actions.CloseProgram)
             {
                 ServerMaintenance.Handle? maintenance = null;
@@ -419,6 +435,18 @@ namespace MultronUpdater.Services
                 }
                 Logger.Info($"[{name}] {replaced.Count} file(s) replaced in {p.LocalFolder}.");
             }
+            catch (Exception ex) when (reloadOnly && ex is not OperationCanceledException)
+            {
+                // A file is held open by the running server: put the old files back and
+                // update the usual way (close, replace, start).
+                Logger.Warn($"[{name}] Replacing files while the server runs failed ({ex.Message}); closing it for the update instead.");
+                foreach (var (local, bak) in replaced)
+                {
+                    try { if (bak != null) File.Copy(bak, local, true); else File.Delete(local); } catch { }
+                }
+                await InstallStagedAsync(p, files, requested, staging, ct, allowReload: false);
+                return;
+            }
             catch (Exception ex)
             {
                 Logger.Error($"[{name}] Replacing files failed, rolling back to the previous version: " + ex.Message);
@@ -427,18 +455,22 @@ namespace MultronUpdater.Services
                     try { if (bak != null) File.Copy(bak, local, true); else File.Delete(local); } catch { }
                 }
                 if (exePath != null && wasRunning) ProgramRunner.Start(p, exePath);
+                try { Directory.Delete(staging, true); } catch { }
                 throw;
             }
-            finally
-            {
-                try { Directory.Delete(staging, true); } catch { }
-            }
+            try { Directory.Delete(staging, true); } catch { }
 
             if (!p.KeepBackup) { try { if (Directory.Exists(backup)) Directory.Delete(backup, true); } catch { } }
             else if (Directory.Exists(backup))
             {
                 Logger.Info($"[{name}] Backup of replaced files: {backup}");
                 CleanupOldBackups(Path.Combine(AppSettings.DataFolder, "backups", p.Id), keep: 3);
+            }
+
+            if (reloadOnly)
+            {
+                Report(p, UpdateStage.Starting, "Reloading the server's signatures...");
+                await ServerMaintenance.ReloadSignaturesAsync(p, ct);
             }
 
             if (exePath != null && actions.RestartProgram)
