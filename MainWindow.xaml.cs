@@ -68,13 +68,13 @@ namespace MultronUpdater
 
         private void HookAutoSave()
         {
-            foreach (var box in new[] { NameBox, OwnerBox, RepoBox, BranchBox, RepoPathBox, FolderBox, ExeBox, IntervalBox, ServerUrlBox, DrainBox })
+            foreach (var box in new[] { NameBox, OwnerBox, RepoBox, BranchBox, RepoPathBox, FolderBox, ExeBox, IntervalBox, ServerUrlBox, DrainBox, LocalRepoBox })
                 box.TextChanged += (_, _) => ScheduleAutoSave();
             TokenBox.PasswordChanged += (_, _) => ScheduleAutoSave();
             foreach (var check in new[] { EnabledCheck, RestartCheck, EdgeCheck, BackupCheck, OnlyFilesCheck, NotifyCheck, MinimizedCheck, StartupCheck, SelfUpdateCheck })
                 check.Click += (_, _) => ScheduleAutoSave();
             foreach (var radio in new[] { WindowsAppRadio, ConsoleAppRadio, ConsoleShowRadio, ConsoleKeepRadio, ConsoleHiddenRadio,
-                                          SourceBothRadio, SourceRepoRadio, SourceReleasesRadio })
+                                          SourceBothRadio, SourceRepoRadio, SourceReleasesRadio, SourceLocalRadio })
                 radio.Click += (_, _) => ScheduleAutoSave();
             ExtractZipCheck.Click += (_, _) => ScheduleAutoSave();
             ServerMaintCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
@@ -152,6 +152,8 @@ namespace MultronUpdater
                 SourceBothRadio.IsChecked = p.Source == TargetSource.Both;
                 SourceRepoRadio.IsChecked = p.Source == TargetSource.Repository;
                 SourceReleasesRadio.IsChecked = p.Source == TargetSource.Releases;
+                SourceLocalRadio.IsChecked = p.Source == TargetSource.LocalFolder;
+                LocalRepoBox.Text = p.LocalRepoFolder;
                 AssetBox.Text = p.ReleaseAsset;
                 ExtractZipCheck.IsChecked = p.ExtractZipAssets;
                 NoAdminCheck.IsChecked = p.StartWithoutAdmin;
@@ -189,9 +191,11 @@ namespace MultronUpdater
             p.SetToken(TokenBox.Password);
             p.LocalFolder = FolderBox.Text.Trim();
             p.ExeName = ExeBox.Text.Trim();
-            p.Source = SourceReleasesRadio.IsChecked == true ? TargetSource.Releases
+            p.Source = SourceLocalRadio.IsChecked == true ? TargetSource.LocalFolder
+                     : SourceReleasesRadio.IsChecked == true ? TargetSource.Releases
                      : SourceRepoRadio.IsChecked == true ? TargetSource.Repository
                      : TargetSource.Both;
+            p.LocalRepoFolder = LocalRepoBox.Text.Trim();
             p.ReleaseAsset = AssetBox.Text.Trim();
             p.ExtractZipAssets = ExtractZipCheck.IsChecked == true;
             p.StartWithoutAdmin = NoAdminCheck.IsChecked == true;
@@ -479,11 +483,20 @@ namespace MultronUpdater
 
         private void Source_Changed(object sender, RoutedEventArgs e) => UpdateSourceUi();
 
+        private void BrowseLocalRepo_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFolderDialog { Title = "Select the local copy of the repository" };
+            if (Directory.Exists(LocalRepoBox.Text)) dlg.InitialDirectory = LocalRepoBox.Text;
+            if (dlg.ShowDialog(this) == true) LocalRepoBox.Text = dlg.FolderName;
+        }
+
         private void UpdateSourceUi()
         {
-            if (ReleaseOptions == null || SourceRepoRadio == null) return;
-            bool releases = SourceRepoRadio.IsChecked != true;
+            if (ReleaseOptions == null || SourceRepoRadio == null || SourceLocalRadio == null || LocalOptions == null) return;
+            bool local = SourceLocalRadio.IsChecked == true;
+            bool releases = !local && SourceRepoRadio.IsChecked != true;
             ReleaseOptions.Visibility = releases ? Visibility.Visible : Visibility.Collapsed;
+            LocalOptions.Visibility = local ? Visibility.Visible : Visibility.Collapsed;
 
             var probe = new UpdateProfile { ReleaseAsset = AssetBox.Text, ExeName = ExeBox.Text, RepoPath = RepoPathBox.Text };
             var effective = probe.EffectiveAssetPattern();
@@ -733,7 +746,7 @@ namespace MultronUpdater
             if (!_current.IsConfigured(out var err)) { ShowWarning(err); return; }
 
             LoadFilesButton.IsEnabled = false;
-            UpdateFilesSummary("Loading the file list from GitHub...");
+            UpdateFilesSummary(_current.UsesLocalFolder ? "Reading the file list from the local repository folder..." : "Loading the file list from GitHub...");
             var profile = _current;
             try
             {

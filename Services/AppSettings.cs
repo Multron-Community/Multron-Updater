@@ -26,7 +26,12 @@ namespace MultronUpdater.Services
         public List<TrackedFile> Files { get; set; } = new();
     }
 
-    public enum TargetSource { Both, Repository, Releases }
+    /// <summary>
+    /// Where updates come from. <see cref="LocalFolder"/> reads a copy of the repository on
+    /// disk (a clone, a USB drive, a network share) and never uses the internet. New values
+    /// go at the end: settings.json stores the number.
+    /// </summary>
+    public enum TargetSource { Both, Repository, Releases, LocalFolder }
 
     public class UpdateProfile : INotifyPropertyChanged
     {
@@ -55,8 +60,12 @@ namespace MultronUpdater.Services
         public string? InstalledReleaseDigest { get; set; }
         public List<string> InstalledReleaseFiles { get; set; } = new();
 
-        [JsonIgnore] public bool UsesRepository => Source != TargetSource.Releases;
-        [JsonIgnore] public bool UsesReleases => Source != TargetSource.Repository;
+        /// <summary>Root of the repository copy on disk (for <see cref="TargetSource.LocalFolder"/>).</summary>
+        public string LocalRepoFolder { get; set; } = "";
+
+        [JsonIgnore] public bool UsesRepository => Source is TargetSource.Both or TargetSource.Repository;
+        [JsonIgnore] public bool UsesReleases => Source is TargetSource.Both or TargetSource.Releases;
+        [JsonIgnore] public bool UsesLocalFolder => Source == TargetSource.LocalFolder;
 
         public string LocalFolder { get; set; } = "";
         public string ExeName { get; set; } = "";
@@ -122,12 +131,14 @@ namespace MultronUpdater.Services
         public string DisplayName => string.IsNullOrWhiteSpace(Name) ? (string.IsNullOrWhiteSpace(Repo) ? "Unnamed target" : Repo) : Name;
 
         [JsonIgnore]
-        public string SourceText => string.IsNullOrWhiteSpace(Owner) || string.IsNullOrWhiteSpace(Repo)
-            ? "Not configured"
-            : $"{Owner}/{Repo} · {Branch}";
+        public string SourceText => UsesLocalFolder
+            ? (string.IsNullOrWhiteSpace(LocalRepoFolder) ? "Not configured" : $"Local: {LocalRepoFolder}")
+            : string.IsNullOrWhiteSpace(Owner) || string.IsNullOrWhiteSpace(Repo)
+                ? "Not configured"
+                : $"{Owner}/{Repo} · {Branch}";
 
         [JsonIgnore]
-        public string SourceKey => $"{Owner}/{Repo}@{Branch}:{RepoPath}>{LocalFolder}|{Source}|{ReleaseAsset}|{ExtractZipAssets}".ToLowerInvariant();
+        public string SourceKey => $"{Owner}/{Repo}@{Branch}:{RepoPath}>{LocalFolder}|{Source}|{ReleaseAsset}|{ExtractZipAssets}|{LocalRepoFolder}".ToLowerInvariant();
 
         public string EffectiveAssetPattern()
         {
@@ -159,6 +170,13 @@ namespace MultronUpdater.Services
 
         public bool IsConfigured(out string error)
         {
+            if (UsesLocalFolder)
+            {
+                if (string.IsNullOrWhiteSpace(LocalRepoFolder)) { error = "Local repository folder is empty."; return false; }
+                if (string.IsNullOrWhiteSpace(LocalFolder)) { error = "Local target folder is empty."; return false; }
+                error = "";
+                return true;
+            }
             if (string.IsNullOrWhiteSpace(Owner) || string.IsNullOrWhiteSpace(Repo)) { error = "GitHub owner/repository is empty."; return false; }
             if (UsesRepository && string.IsNullOrWhiteSpace(Branch)) { error = "Branch is empty."; return false; }
             if (UsesRepository && string.IsNullOrWhiteSpace(RepoPath)) { error = "Path in repository is empty."; return false; }

@@ -75,10 +75,16 @@ namespace MultronUpdater.Services
             try
             {
                 if (!p.IsConfigured(out var err)) throw new InvalidOperationException("Settings are incomplete: " + err);
-                Report(p, UpdateStage.Checking, "Checking GitHub...");
+                Report(p, UpdateStage.Checking, p.UsesLocalFolder ? "Checking the local repository folder..." : "Checking GitHub...");
 
                 var parts = new List<PartResult>();
                 var errors = new List<string>();
+
+                if (p.UsesLocalFolder)
+                {
+                    try { parts.Add(await CheckLocalFolderAsync(p, force, ct)); }
+                    catch (Exception ex) when (ex is not OperationCanceledException) { errors.Add(ex.Message); Logger.Error($"[{name}] {ex.Message}"); }
+                }
 
                 if (p.UsesRepository)
                 {
@@ -230,6 +236,158 @@ namespace MultronUpdater.Services
             await InstallStagedAsync(p, staged, actions, staging, ct);
             _verified[verifiedKey] = new VerifiedState(key, TakeStamps(localPaths));
             return new PartResult(true, $"Updated {changed.Count} file(s) from the repository (commit {shortSha})", changed.Count, localPaths);
+        }
+
+        /// <summary>A file of the local repository copy: path relative to the source and on disk.</summary>
+        private sealed record LocalSourceFile(string RelativePath, string SourcePath, long Size, DateTime WriteTimeUtc);
+
+        /// <summary>
+        /// Files under <see cref="UpdateProfile.RepoPath"/> in the local repository copy (a single
+        /// file or a folder; empty = the whole folder). <c>.git</c> folders are skipped.
+        /// </summary>
+        private static List<LocalSourceFile> GetLocalSourceFiles(UpdateProfile p)
+        {
+            var repoRoot = Path.GetFullPath(p.LocalRepoFolder.Trim());
+            if (!Directory.Exists(repoRoot))
+                throw new InvalidOperationException($"Local repository folder '{repoRoot}' was not found (is the drive or share connected?).");
+            var rel = p.RepoPath.Replace('\\', '/').Trim('/');
+            var source = rel.Length == 0 ? repoRoot : Path.GetFullPath(Path.Combine(repoRoot, rel.Replace('/', Path.DirectorySeparatorChar)));
+            var repoWithSlash = repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (source != repoRoot && !source.StartsWith(repoWithSlash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Path '{p.RepoPath}' points outside the local repository folder.");
+
+            var target = Path.GetFullPath(p.LocalFolder).TrimEnd(Path.DirectorySeparatorChar);
+            var sourceDir = (File.Exists(source) ? Path.GetDirectoryName(source)! : source).TrimEnd(Path.DirectorySeparatorChar);
+            if (string.Equals(sourceDir, target, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The local repository path and the target folder are the same folder.");
+
+            var result = new List<LocalSourceFile>();
+            if (File.Exists(source))
+            {
+                var fi = new FileInfo(source);
+                result.Add(new LocalSourceFile(fi.Name, fi.FullName, fi.Length, fi.LastWriteTimeUtc));
+                return result;
+            }
+            if (!Directory.Exists(source))
+                throw new InvalidOperationException($"Path '{p.RepoPath}' was not found in the local repository folder '{repoRoot}'.");
+
+            var targetWithSlash = target + Path.DirectorySeparatorChar;
+            foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(source, file).Replace('\\', '/');
+                if (relative.Split('/').Any(s => s.Equals(".git", StringComparison.OrdinalIgnoreCase))) continue;
+                // The target folder inside the source tree is not a source.
+                if (file.StartsWith(targetWithSlash, StringComparison.OrdinalIgnoreCase)) continue;
+                var fi = new FileInfo(file);
+                result.Add(new LocalSourceFile(relative, fi.FullName, fi.Length, fi.LastWriteTimeUtc));
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Update from a repository copy on disk: no internet. Files are compared with SHA-256,
+        /// copied into a staging folder (a snapshot, so later changes to the copy do not mix in),
+        /// verified again, and installed with the same flow as GitHub updates (maintenance,
+        /// close, backup, replace, rollback, signature reload).
+        /// </summary>
+        private async Task<PartResult> CheckLocalFolderAsync(UpdateProfile p, bool force, CancellationToken ct)
+        {
+            var name = p.DisplayName;
+            var files = await Task.Run(() => GetLocalSourceFiles(p), ct);
+            if (p.OnlySelectedFiles)
+            {
+                var wanted = p.GetIncludedFiles();
+                if (wanted.Count == 0)
+                    throw new InvalidOperationException("\"Update only the checked files\" is on, but no file is checked in an enabled group.");
+                files = files.Where(f => wanted.ContainsKey(f.RelativePath)).ToList();
+                if (files.Count == 0)
+                    throw new InvalidOperationException($"None of the checked files exist under '{p.RepoPath}' in the local repository folder.");
+            }
+            if (files.Count == 0)
+                throw new InvalidOperationException($"No files under '{p.RepoPath}' in the local repository folder.");
+
+            // Same source files (names, sizes, times) as last time and the installed files
+            // untouched: nothing to hash.
+            var key = string.Join("|", files.OrderBy(f => f.RelativePath, StringComparer.OrdinalIgnoreCase)
+                                             .Select(f => $"{f.RelativePath}:{f.Size}:{f.WriteTimeUtc.Ticks}"))
+                      + "|" + p.SourceKey + "|" + p.SelectionKey;
+            var verifiedKey = p.Id + ":local";
+            if (!force && _verified.TryGetValue(verifiedKey, out var known) && known.Key == key && StampsStillMatch(known.Files))
+                return new PartResult(false, "Up to date with the local repository folder", 0, known.Files.Select(f => f.Path).ToList());
+
+            var localRoot = Path.GetFullPath(p.LocalFolder);
+            var rootWithSlash = localRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var changed = new List<(LocalSourceFile Source, string LocalPath, string Sha256)>();
+            var localPaths = new List<string>();
+            await Task.Run(() =>
+            {
+                foreach (var f in files)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var local = Path.GetFullPath(Path.Combine(localRoot, f.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+                    if (!local.StartsWith(rootWithSlash, StringComparison.OrdinalIgnoreCase)) continue;
+                    localPaths.Add(local);
+                    var sourceSha = ComputeSha256(f.SourcePath);
+                    if (force || !File.Exists(local) || new FileInfo(local).Length != f.Size || ComputeSha256(local) != sourceSha)
+                        changed.Add((f, local, sourceSha));
+                }
+            }, ct);
+
+            if (changed.Count == 0)
+            {
+                _verified[verifiedKey] = new VerifiedState(key, TakeStamps(localPaths));
+                Logger.Info($"[{name}] Up to date with the local repository folder ({files.Count} file(s)).");
+                return new PartResult(false, "Up to date with the local repository folder", 0, localPaths);
+            }
+
+            Logger.Info($"[{name}] Local repository folder: {changed.Count} file(s) changed.");
+            var staging = Path.Combine(AppSettings.DataFolder, "downloads", p.Id, "local-" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            if (Directory.Exists(staging)) Directory.Delete(staging, true);
+            var staged = new List<StagedFile>();
+            long total = Math.Max(1, changed.Sum(c => c.Source.Size));
+            long done = 0;
+            for (int i = 0; i < changed.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                var (src, local, sha) = changed[i];
+                Report(p, UpdateStage.Downloading, "Copying from the local repository folder...", i + 1, changed.Count, done, total, src.RelativePath);
+                var dest = Path.Combine(staging, src.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                await RetryAsync(() => File.Copy(src.SourcePath, dest, true), ct);
+                done += src.Size;
+
+                // The copy must be the file that was compared (not changed or cut short meanwhile).
+                var stagedSha = ComputeSha256(dest);
+                if (stagedSha != sha)
+                    throw new InvalidOperationException($"'{src.RelativePath}' changed while it was being copied from the local repository folder; try again.");
+                if (IsLfsPointer(dest))
+                    throw new InvalidOperationException($"'{src.RelativePath}' is a Git LFS pointer in the local repository folder (run 'git lfs pull' there first).");
+                var sidecar = src.SourcePath + ".sha256";
+                if (File.Exists(sidecar) && Regex.Match(File.ReadAllText(sidecar), "[0-9a-fA-F]{64}") is { Success: true } m &&
+                    m.Value.ToLowerInvariant() != stagedSha)
+                    throw new InvalidOperationException($"'{src.RelativePath}' does not match its .sha256 file in the local repository folder.");
+                Logger.Info($"[{name}] Copied {src.RelativePath} ({FormatSize(src.Size)}), SHA-256 {stagedSha[..16]}…");
+                staged.Add(new StagedFile(src.RelativePath, local, dest));
+            }
+            Report(p, UpdateStage.Downloading, "Copy complete", changed.Count, changed.Count, total, total);
+
+            AfterActions actions;
+            if (p.OnlySelectedFiles)
+            {
+                var groupOf = p.GetIncludedFiles();
+                var groups = changed.Select(c => groupOf.TryGetValue(c.Source.RelativePath, out var g) ? g : null)
+                                    .Where(g => g != null).Distinct().ToList();
+                bool restart = groups.Any(g => g!.RestartProgram);
+                actions = new AfterActions(restart, restart, groups.Any(g => g!.RefreshEdge));
+            }
+            else
+            {
+                actions = new AfterActions(true, p.RestartAfterUpdate, p.RefreshEdgeAfterUpdate);
+            }
+
+            await InstallStagedAsync(p, staged, actions, staging, ct);
+            _verified[verifiedKey] = new VerifiedState(key, TakeStamps(localPaths));
+            return new PartResult(true, $"Updated {changed.Count} file(s) from the local repository folder", changed.Count, localPaths);
         }
 
         private async Task<PartResult> CheckReleaseAsync(UpdateProfile p, bool force, bool required, HashSet<string> managedByRepository, CancellationToken ct)
@@ -492,6 +650,28 @@ namespace MultronUpdater.Services
 
         public async Task<List<FileStatus>> GetFileStatusAsync(UpdateProfile p, CancellationToken ct = default)
         {
+            if (p.UsesLocalFolder)
+            {
+                if (!p.IsConfigured(out var lerr)) throw new InvalidOperationException(lerr);
+                return await Task.Run(() =>
+                {
+                    var localRoot = Path.GetFullPath(p.LocalFolder);
+                    var list = new List<FileStatus>();
+                    var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var f in GetLocalSourceFiles(p))
+                    {
+                        present.Add(f.RelativePath);
+                        var local = Path.Combine(localRoot, f.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                        var state = !File.Exists(local) ? FileState.New
+                                  : new FileInfo(local).Length == f.Size && ComputeSha256(local) == ComputeSha256(f.SourcePath) ? FileState.UpToDate
+                                  : FileState.Changed;
+                        list.Add(new FileStatus(f.RelativePath, state, f.Size));
+                    }
+                    foreach (var path in p.AllTrackedPaths().Distinct(StringComparer.OrdinalIgnoreCase))
+                        if (!present.Contains(path)) list.Add(new FileStatus(path, FileState.NotOnGitHub, 0));
+                    return list;
+                }, ct);
+            }
             if (!p.UsesRepository) throw new InvalidOperationException("This target only uses releases; there is no repository file list.");
             if (!p.IsConfigured(out var err)) throw new InvalidOperationException(err);
             var sha = await _github.GetLatestCommitShaAsync(p, ct);

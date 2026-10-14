@@ -167,7 +167,7 @@
 
                             <Border Style="{StaticResource Card}">
                                 <StackPanel>
-                                    <TextBlock Text="1.  GitHub source" Style="{StaticResource CardTitle}"/>
+                                    <TextBlock Text="1.  Update source" Style="{StaticResource CardTitle}"/>
 
                                     <TextBlock Text="GitHub link (optional – fills the fields below)" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
                                     <Grid>
@@ -226,7 +226,28 @@
                                         <RadioButton x:Name="SourceReleasesRadio" GroupName="UpdateSource" Margin="0,4,0,0" Checked="Source_Changed">
                                             <TextBlock TextWrapping="Wrap"><Run Text="Releases only" FontWeight="SemiBold"/><Run Text="  – installs the files of the latest GitHub release, verified with SHA-256" Foreground="#656D76"/></TextBlock>
                                         </RadioButton>
+                                        <RadioButton x:Name="SourceLocalRadio" GroupName="UpdateSource" Margin="0,4,0,0" Checked="Source_Changed">
+                                            <TextBlock TextWrapping="Wrap"><Run Text="Local repository folder (no internet)" FontWeight="SemiBold"/><Run Text="  – a copy of the repository on this computer, a USB drive or a share; files are compared with SHA-256" Foreground="#656D76"/></TextBlock>
+                                        </RadioButton>
                                     </StackPanel>
+
+                                    <Border x:Name="LocalOptions" Background="#F6F8FA" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                            CornerRadius="6" Padding="12,8" Margin="0,10,0,0" Visibility="Collapsed">
+                                        <StackPanel>
+                                            <TextBlock Text="Local repository folder" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="LocalRepoBox"
+                                                         ToolTip="Root of the repository copy, e.g. C:\Users\me\GitHub\HydraDragonAntivirus or E:\HydraDragonAntivirus"/>
+                                                <Button Grid.Column="1" Content="Browse..." Margin="8,0,0,0" Click="BrowseLocalRepo_Click"/>
+                                            </Grid>
+                                            <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap"
+                                                       Text="Path in repository is read from this folder (empty = the whole folder; .git is skipped). Nothing is downloaded: the changed files are copied, checked with SHA-256 (and a &lt;file&gt;.sha256 next to them) and installed the same way as GitHub updates, with maintenance, backup and rollback. Owner, repository, branch and token are not used."/>
+                                        </StackPanel>
+                                    </Border>
 
                                     <Border x:Name="ReleaseOptions" Background="#F6F8FA" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
                                             CornerRadius="6" Padding="12,8" Margin="0,10,0,0">

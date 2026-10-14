@@ -13,6 +13,7 @@ Built with C# / WPF on .NET 8.
 
 - **Multiple targets** – add as many repo → program pairs as you like, each with its own settings. Enable, duplicate or remove them from the list.
 - **GitHub as the update source** – pick any owner, repository, branch and path (a single file or a whole folder).
+- **Local repository folder (no internet)** – update from a copy of the repository on disk (a clone, a USB drive, a network share) with the same safe install flow.
 - **After-update actions per target** – start the program again and/or refresh the active Microsoft Edge tab (F5).
 - **Windows and console programs** – start arguments, and for console apps: show the window, keep it open after exit, or run hidden with the output written to a log file. Console apps are closed with Ctrl+C before an update.
 - **Multron server maintenance** – for a Multron / VirusKov cloud scan server target, the server is switched to its "Updating server" maintenance mode through its local dashboard before it is closed: clients are told the server is being updated and scans in progress finish first. The updated server starts with scans open again.
@@ -59,6 +60,28 @@ Each target chooses where updates come from (**GitHub source → Update source**
 | **Repository files + releases** (default) | Files under *Path in repository* are kept in sync with the branch, so a push is seen right away. New releases install the files the repository does not have; a file that exists in both is taken from the repository. |
 | **Repository files only** | Raw files from the branch. Each file is checked with its git hash; if a `<file>.sha256` sits next to it in the repository, the SHA-256 is verified too. |
 | **Releases only** | Installs the file(s) of the latest GitHub release, verified with the SHA-256 GitHub publishes for every asset. |
+| **Local repository folder (no internet)** | Reads *Path in repository* from a copy of the repository on disk instead of GitHub. Nothing is downloaded and owner, repository, branch and token are not used. |
+
+#### Local repository folder (no internet)
+
+For a computer without internet access (for example a Multron / VirusKov scan server), choose
+**Local repository folder (no internet)** and pick the root of the repository copy, e.g.
+`C:\Users\me\GitHub\HydraDragonAntivirus`, `E:\HydraDragonAntivirus` on a USB drive or
+`\\MAINPC\share\HydraDragonAntivirus`. *Path in repository* is read from that folder (a file or a folder;
+empty = the whole folder), so `OpenMalwareScannerPortable` keeps a Multron server install in sync.
+
+- Files are compared with SHA-256; only new or changed files are copied. A file you changed in the
+  target folder is put back. When the copy's names, sizes and times have not changed since the last
+  check, nothing is hashed, so frequent automatic checks stay cheap.
+- The changed files are first copied into a staging folder and checked again, so a file that changes
+  in the repository copy while it is being copied is not installed. A `<file>.sha256` next to a file
+  in the copy is verified, and Git LFS pointers (a clone without `git lfs pull`) are refused.
+- `.git` folders are skipped. Nothing is ever deleted from the target folder.
+- Everything else is the same as for GitHub updates: *Update only the checked files* and file groups,
+  Multron server maintenance and signature reload, closing and restarting the program, backups and
+  automatic rollback.
+- If the folder is missing (the USB drive or share is not connected), the check fails with that
+  message and the installed files are left alone.
 
 **Release file(s) to install** takes a file name, wildcards (`MyApp-*-win64.zip`) or several names separated by `;`.
 When it is empty, the name of the program (or of the file in *Path in repository*) is used. A single `.exe` asset is installed
