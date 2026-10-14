@@ -555,6 +555,20 @@ namespace MultronUpdater.Services
                 actions = actions with { CloseProgram = false, RestartProgram = false };
             }
 
+            // Multron server, seamless update: the new version starts next to the running
+            // one and takes over when it has loaded; scans are not stopped meanwhile.
+            if (!reloadOnly && allowReload && p.ServerSeamlessUpdate && exePath != null && actions.CloseProgram && actions.RestartProgram)
+            {
+                var status = await ServerMaintenance.GetServerStatusAsync(p, ct);
+                if (status is { Seamless: true })
+                {
+                    await SeamlessUpdateAsync(p, files, exePath, status.Pid, staging, actions, ct);
+                    return;
+                }
+                if (status != null)
+                    Logger.Info($"[{name}] The running server is too old for a seamless update; it is restarted the usual way this time (the next updates are seamless).");
+            }
+
             if (exePath != null && actions.CloseProgram)
             {
                 ServerMaintenance.Handle? maintenance = null;
@@ -643,6 +657,175 @@ namespace MultronUpdater.Services
                 if (EdgeRefresher.RefreshActiveTab(out var edgeMsg)) Logger.Info($"[{name}] {edgeMsg}");
                 else Logger.Warn($"[{name}] Edge refresh skipped: {edgeMsg}");
             }
+        }
+
+        /// <summary>
+        /// Seamless update of a running Multron server: files the server holds open are
+        /// renamed to <c>*.old-&lt;time&gt;</c> (Windows allows renaming a running exe) and the
+        /// new ones are put in their place; the new version is started with <c>--handoff</c>
+        /// and loads next to the running server, which keeps scanning ("getting updated")
+        /// until the new one takes its ports over. The update counts as done when the
+        /// dashboard answers from a new process. If the new version does not take over,
+        /// the previous files are put back and the running server is left as it was.
+        /// </summary>
+        private async Task SeamlessUpdateAsync(UpdateProfile p, List<StagedFile> files, string exePath, int oldPid,
+                                               string staging, AfterActions actions, CancellationToken ct)
+        {
+            var name = p.DisplayName;
+            var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var backup = Path.Combine(AppSettings.DataFolder, "backups", p.Id, stamp);
+            var replaced = new List<(string Local, string? Backup, string? Renamed)>();
+
+            void Rollback()
+            {
+                foreach (var (local, bak, renamed) in Enumerable.Reverse(replaced))
+                {
+                    try
+                    {
+                        if (renamed != null)
+                        {
+                            if (File.Exists(local)) File.Delete(local);
+                            File.Move(renamed, local);
+                        }
+                        else if (bak != null) File.Copy(bak, local, true);
+                        else File.Delete(local);
+                    }
+                    catch (Exception ex) { Logger.Warn($"[{name}] Could not put back {local}: {ex.Message}"); }
+                }
+            }
+
+            // Renamed copies of earlier seamless updates (their process has exited by now).
+            foreach (var f in files) DeleteOldCopies(f.LocalPath);
+
+            Report(p, UpdateStage.Installing, "Installing next to the running server...");
+            try
+            {
+                foreach (var f in files)
+                {
+                    string? bak = null, renamed = null;
+                    if (File.Exists(f.LocalPath))
+                    {
+                        bak = Path.Combine(backup, f.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+                        Directory.CreateDirectory(Path.GetDirectoryName(bak)!);
+                        await RetryAsync(() => File.Copy(f.LocalPath, bak, true), ct);
+                    }
+                    Directory.CreateDirectory(Path.GetDirectoryName(f.LocalPath)!);
+                    try { File.Copy(f.StagingPath, f.LocalPath, true); }
+                    catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException) && File.Exists(f.LocalPath))
+                    {
+                        // Held open by the running server (its exe / dll): move it aside.
+                        renamed = f.LocalPath + ".old-" + stamp;
+                        File.Move(f.LocalPath, renamed);
+                        replaced.Add((f.LocalPath, bak, renamed));
+                        File.Copy(f.StagingPath, f.LocalPath, true);
+                        continue;
+                    }
+                    replaced.Add((f.LocalPath, bak, null));
+                }
+                Logger.Info($"[{name}] {replaced.Count} file(s) replaced in {p.LocalFolder} while the server keeps running ({replaced.Count(r => r.Renamed != null)} in use, renamed to *.old-{stamp}).");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[{name}] Replacing files failed, rolling back; the server keeps running: " + ex.Message);
+                Rollback();
+                throw;
+            }
+            try { Directory.Delete(staging, true); } catch { }
+
+            Report(p, UpdateStage.Starting, "Starting the new version next to the running server (seamless update)...");
+            var drain = Math.Clamp(p.ServerDrainSeconds, 0, 300);
+            ProgramRunner.Start(p, exePath, $"--handoff --handoff-drain-secs {drain}");
+            Logger.Info($"[{name}] Seamless update: the running server (pid {oldPid}) keeps scanning while the new version loads.");
+
+            var limit = TimeSpan.FromMinutes(Math.Clamp(p.ServerSeamlessMinutes, 1, 180));
+            var started = DateTime.UtcNow;
+            DateTime? downSince = null;
+            bool sawStandby = false;
+            int? standbyPid = null;
+            string? failure = null;
+            while (true)
+            {
+                await Task.Delay(2000, ct);
+                var st = await ServerMaintenance.GetServerStatusAsync(p, ct);
+                var now = DateTime.UtcNow;
+                if (st == null)
+                {
+                    // The switch itself takes a few seconds; much longer means nobody took over.
+                    downSince ??= now;
+                    if (now - downSince.Value > TimeSpan.FromSeconds(90))
+                    {
+                        Logger.Warn($"[{name}] No server answers 90 s after the switch; starting it the usual way.");
+                        ProgramRunner.Start(p, exePath);
+                        break;
+                    }
+                    continue;
+                }
+                downSince = null;
+                if (st.Pid != oldPid)
+                {
+                    Logger.Info($"[{name}] Seamless update done: the new version (pid {st.Pid}) took over from pid {oldPid}.");
+                    break;
+                }
+                if (st.StandbyPid is int sp)
+                {
+                    if (!sawStandby) Report(p, UpdateStage.Starting, "The new version is loading; the running server keeps scanning...");
+                    sawStandby = true;
+                    standbyPid = sp;
+                }
+                else if (st.Mode != "switching" && (sawStandby || now - started > TimeSpan.FromSeconds(120)))
+                {
+                    failure = sawStandby
+                        ? "the new version stopped before it took over (see its console log)"
+                        : "the new version did not start (see its console log)";
+                    break;
+                }
+                if (now - started > limit)
+                {
+                    failure = $"the new version did not finish loading in {limit.TotalMinutes:0} minutes";
+                    if (standbyPid is int pid) await ProgramRunner.CloseByIdAsync(p, pid);
+                    break;
+                }
+            }
+
+            if (failure != null)
+            {
+                Rollback();
+                throw new InvalidOperationException($"Seamless update failed: {failure}. The previous files were put back and the running server was left as it was.");
+            }
+
+            // The old process has exited: its renamed files can go now (or on the next update).
+            await Task.Delay(1000, ct);
+            foreach (var (local, _, renamed) in replaced)
+                if (renamed != null) DeleteOldCopies(local);
+
+            if (!p.KeepBackup) { try { if (Directory.Exists(backup)) Directory.Delete(backup, true); } catch { } }
+            else if (Directory.Exists(backup))
+            {
+                Logger.Info($"[{name}] Backup of replaced files: {backup}");
+                CleanupOldBackups(Path.Combine(AppSettings.DataFolder, "backups", p.Id), keep: 3);
+            }
+
+            if (actions.RefreshEdge)
+            {
+                Report(p, UpdateStage.Starting, "Refreshing the Edge tab...");
+                if (EdgeRefresher.RefreshActiveTab(out var edgeMsg)) Logger.Info($"[{name}] {edgeMsg}");
+                else Logger.Warn($"[{name}] Edge refresh skipped: {edgeMsg}");
+            }
+        }
+
+        /// <summary>Deletes <c>file.old-*</c> copies left by seamless updates (skips ones still in use).</summary>
+        private static void DeleteOldCopies(string file)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(file);
+                if (dir == null || !Directory.Exists(dir)) return;
+                foreach (var old in Directory.GetFiles(dir, Path.GetFileName(file) + ".old-*"))
+                {
+                    try { File.Delete(old); } catch { }
+                }
+            }
+            catch { }
         }
 
         public Task<ReleaseData?> GetLatestReleaseAsync(UpdateProfile p, CancellationToken ct = default) =>

@@ -349,6 +349,9 @@
                                     <CheckBox x:Name="ServerReloadCheck" Margin="0,6,0,0"
                                               Content="Multron server: when no .exe / .dll changed, reload its signatures instead of restarting it"
                                               ToolTip="Signature and rule files are replaced while the server keeps running, then the server reloads them (its dashboard's engine reload). Files held open by the server: it is closed and started as usual."/>
+                                    <CheckBox x:Name="ServerSeamlessCheck" Margin="0,6,0,0"
+                                              Content="Multron server: seamless update (the new version loads next to the running server; scans continue)"
+                                              ToolTip="The running exe is renamed (*.old-&lt;time&gt;), the new files are put in place and the new version is started with --handoff. The running server keeps scanning (&quot;Getting updated&quot;) until the new one has loaded its engine, then hands its ports over in a few seconds. If the new version does not take over, the previous files are put back and the running server stays. A server too old for it is updated the usual way once."/>
                                     <StackPanel x:Name="ServerMaintPanel" Margin="22,6,0,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>

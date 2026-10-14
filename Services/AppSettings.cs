@@ -89,6 +89,16 @@ namespace MultronUpdater.Services
         /// reloaded through the dashboard instead of restarting it.
         /// </summary>
         public bool ServerReloadSignatures { get; set; } = false;
+        /// <summary>
+        /// Multron cloud scan server: seamless update. The running exe is renamed (Windows
+        /// allows that), the new files are put in place and the new version is started with
+        /// <c>--handoff</c> next to the running server, which keeps scanning ("getting
+        /// updated") until the new one has loaded and takes its ports over in a few seconds.
+        /// A server too old for it is updated the usual way once.
+        /// </summary>
+        public bool ServerSeamlessUpdate { get; set; } = false;
+        /// <summary>How long the new version may take to load before the update is undone.</summary>
+        public int ServerSeamlessMinutes { get; set; } = 20;
 
         public bool OnlySelectedFiles { get; set; } = false;
         public List<FileGroup> Groups { get; set; } = new();

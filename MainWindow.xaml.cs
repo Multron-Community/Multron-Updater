@@ -79,6 +79,7 @@ namespace MultronUpdater
             ExtractZipCheck.Click += (_, _) => ScheduleAutoSave();
             ServerMaintCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
             ServerReloadCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
+            ServerSeamlessCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
             NoAdminCheck.Click += (_, _) => ScheduleAutoSave();
             ArgsBox.TextChanged += (_, _) => ScheduleAutoSave();
             AssetBox.TextChanged += (_, _) => { ScheduleAutoSave(); UpdateSourceUi(); };
@@ -92,7 +93,8 @@ namespace MultronUpdater
         }
 
         private void UpdateServerMaintUi() =>
-            ServerMaintPanel.Visibility = ServerMaintCheck.IsChecked == true || ServerReloadCheck.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            ServerMaintPanel.Visibility = ServerMaintCheck.IsChecked == true || ServerReloadCheck.IsChecked == true || ServerSeamlessCheck.IsChecked == true
+                ? Visibility.Visible : Visibility.Collapsed;
 
         private void ScheduleAutoSave()
         {
@@ -164,6 +166,7 @@ namespace MultronUpdater
                 BackupCheck.IsChecked = p.KeepBackup;
                 ServerMaintCheck.IsChecked = p.ServerMaintenance;
                 ServerReloadCheck.IsChecked = p.ServerReloadSignatures;
+                ServerSeamlessCheck.IsChecked = p.ServerSeamlessUpdate;
                 ServerUrlBox.Text = p.ServerDashboardUrl;
                 DrainBox.Text = p.ServerDrainSeconds.ToString();
                 UpdateServerMaintUi();
@@ -208,6 +211,7 @@ namespace MultronUpdater
             p.KeepBackup = BackupCheck.IsChecked == true;
             p.ServerMaintenance = ServerMaintCheck.IsChecked == true;
             p.ServerReloadSignatures = ServerReloadCheck.IsChecked == true;
+            p.ServerSeamlessUpdate = ServerSeamlessCheck.IsChecked == true;
             p.ServerDashboardUrl = string.IsNullOrWhiteSpace(ServerUrlBox.Text) ? "http://127.0.0.1:9440" : ServerUrlBox.Text.Trim();
             if (int.TryParse(DrainBox.Text.Trim(), out var drain)) p.ServerDrainSeconds = Math.Clamp(drain, 0, 600);
             p.OnlySelectedFiles = OnlyFilesCheck.IsChecked == true;
@@ -390,10 +394,19 @@ namespace MultronUpdater
             if (!_current.IsConfigured(out var err)) { ShowWarning(err); return; }
 
             var steps = new List<string> { "all files will be downloaded again from GitHub" };
-            if (!string.IsNullOrEmpty(_current.ExeName) && _current.ServerMaintenance) steps.Add("the server will be switched to \"Updating server\" maintenance");
-            if (!string.IsNullOrEmpty(_current.ExeName)) steps.Add($"{_current.ExeName} will be closed");
-            steps.Add("the files will be replaced");
-            if (!string.IsNullOrEmpty(_current.ExeName) && _current.RestartAfterUpdate) steps.Add($"{_current.ExeName} will be started again");
+            bool seamless = !string.IsNullOrEmpty(_current.ExeName) && _current.ServerSeamlessUpdate && _current.RestartAfterUpdate;
+            if (seamless)
+            {
+                steps.Add("the files will be replaced while the server keeps running (files in use are renamed)");
+                steps.Add($"the new {_current.ExeName} will load next to it and take over in a few seconds (scans continue)");
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(_current.ExeName) && _current.ServerMaintenance) steps.Add("the server will be switched to \"Updating server\" maintenance");
+                if (!string.IsNullOrEmpty(_current.ExeName)) steps.Add($"{_current.ExeName} will be closed");
+                steps.Add("the files will be replaced");
+                if (!string.IsNullOrEmpty(_current.ExeName) && _current.RestartAfterUpdate) steps.Add($"{_current.ExeName} will be started again");
+            }
             if (_current.RefreshEdgeAfterUpdate) steps.Add("the active Edge tab will be refreshed");
 
             if (MessageBox.Show(this, $"Force update \"{_current.DisplayName}\":\n\n• " + string.Join("\n• ", steps) + "\n\nContinue?",

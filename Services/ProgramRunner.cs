@@ -42,12 +42,13 @@ namespace MultronUpdater.Services
             catch { return null; }
         }
 
-        public static void Start(UpdateProfile p, string exePath)
+        /// <param name="extraArgs">Added after the profile's arguments (e.g. <c>--handoff</c>).</param>
+        public static void Start(UpdateProfile p, string exePath, string extraArgs = "")
         {
             var name = p.DisplayName;
             if (!File.Exists(exePath)) { Logger.Warn($"[{name}] Cannot start, file not found: {exePath}"); return; }
             var dir = Path.GetDirectoryName(exePath)!;
-            var args = p.StartArguments?.Trim() ?? "";
+            var args = ((p.StartArguments?.Trim() ?? "") + " " + extraArgs).Trim();
             var asUser = p.StartWithoutAdmin && ShellUserLauncher.IsElevated ? " as a normal user (without administrator rights)" : "";
             try
             {
@@ -120,6 +121,30 @@ namespace MultronUpdater.Services
 
             Logger.Info($"[{profileName}] Closing {name} ({procs.Count} process(es))...");
             bool console = profile.IsConsoleApp || IsConsoleExe(exePath) == true;
+            await CloseProcessesAsync(profileName, name, procs, console);
+            return true;
+        }
+
+        /// <summary>
+        /// Closes one process by id, the same way (Ctrl+C or close the window, then
+        /// terminate after 5 s). Used when its exe was renamed for a seamless update.
+        /// False when it is not running.
+        /// </summary>
+        public static async Task<bool> CloseByIdAsync(UpdateProfile profile, int pid)
+        {
+            Process proc;
+            try { proc = Process.GetProcessById(pid); }
+            catch (ArgumentException) { return false; }
+            var name = proc.ProcessName;
+            bool console = profile.IsConsoleApp;
+            try { console |= proc.MainModule?.FileName is string f && IsConsoleExe(f) == true; } catch { }
+            Logger.Info($"[{profile.DisplayName}] Closing {name} (pid {pid})...");
+            await CloseProcessesAsync(profile.DisplayName, name, new() { proc }, console);
+            return true;
+        }
+
+        private static async Task CloseProcessesAsync(string profileName, string name, System.Collections.Generic.List<Process> procs, bool console)
+        {
             foreach (var p in procs)
             {
                 if (console) await Task.Run(() => SendCtrlC(p.Id));
@@ -135,7 +160,6 @@ namespace MultronUpdater.Services
             }
             foreach (var p in procs) { try { p.WaitForExit(10000); } catch { } p.Dispose(); }
             await Task.Delay(500);
-            return true;
         }
 
         private static void SendCtrlC(int pid)

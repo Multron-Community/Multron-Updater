@@ -97,6 +97,31 @@ namespace MultronUpdater.Services
             return new Handle(baseUrl, previous);
         }
 
+        /// <summary>What the running server reports about itself (null = not reachable).</summary>
+        /// <param name="Seamless">The server supports the seamless update (<c>--handoff</c>).</param>
+        /// <param name="StandbyPid">Process id of the new version loading next to it, if any.</param>
+        public sealed record ServerStatus(int Pid, string Mode, bool Seamless, int? StandbyPid);
+
+        public static async Task<ServerStatus?> GetServerStatusAsync(UpdateProfile p, CancellationToken ct)
+        {
+            try
+            {
+                var s = await GetStatusAsync(BaseUrl(p), ct);
+                int pid = s.TryGetProperty("pid", out var pe) && pe.ValueKind == JsonValueKind.Number ? pe.GetInt32() : 0;
+                string mode = s.TryGetProperty("mode", out var m) ? m.GetString() ?? "off" : "off";
+                bool seamless = s.TryGetProperty("seamlessUpdate", out var se) && se.ValueKind == JsonValueKind.True && pid != 0;
+                int? standby = s.TryGetProperty("handoff", out var h) && h.ValueKind == JsonValueKind.Object &&
+                               h.TryGetProperty("standbyPid", out var sp) && sp.ValueKind == JsonValueKind.Number
+                    ? sp.GetInt32()
+                    : null;
+                return new ServerStatus(pid, mode, seamless, standby);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                return null;
+            }
+        }
+
         /// <summary>True when the server's dashboard answers (the server is running).</summary>
         public static async Task<bool> IsRunningAsync(UpdateProfile p, CancellationToken ct)
         {
