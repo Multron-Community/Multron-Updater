@@ -46,6 +46,7 @@ namespace MultronUpdater.Services
         private static bool _listening;
 
         public static bool IsDark { get; private set; }
+        public static AppTheme Current => _theme;
 
         public static void Apply(AppTheme theme)
         {

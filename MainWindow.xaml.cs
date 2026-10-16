@@ -95,8 +95,9 @@ namespace MultronUpdater
             };
             ThemeBox.SelectionChanged += (_, _) =>
             {
-                if (_loading) return;
-                ThemeManager.Apply((AppTheme)Math.Max(0, ThemeBox.SelectedIndex));
+                var theme = (AppTheme)Math.Max(0, ThemeBox.SelectedIndex);
+                if (_loading || theme == ThemeManager.Current) return;
+                ThemeManager.Apply(theme);
                 ScheduleAutoSave();
             };
             ServerMaintCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };

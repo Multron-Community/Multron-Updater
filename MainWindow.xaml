@@ -63,7 +63,7 @@
         <ProgressBar x:Name="BusyBar" DockPanel.Dock="Bottom" Height="3" IsIndeterminate="True" Visibility="Collapsed"
                      Foreground="{DynamicResource AccentBrush}" Background="Transparent" BorderThickness="0"/>
 
-        <TabControl x:Name="Tabs" Margin="20,10,20,0" Background="Transparent" BorderThickness="0" Padding="0,12,0,0">
+        <TabControl x:Name="Tabs" Margin="20,10,20,0" Background="Transparent" Foreground="{DynamicResource TextBrush}" BorderThickness="0" Padding="0,12,0,0">
 
             <TabItem Header="Targets">
                 <Grid Margin="0,0,0,12">

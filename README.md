@@ -1,9 +1,9 @@
 # Multron Updater
 
 **Multron Updater** keeps a Windows program up to date straight from a GitHub repository.
-It watches a file or folder in a repo, and when it changes it downloads the new version,
-closes the running program, replaces the files and starts the program again — automatically,
-from the system tray.
+It watches a file or folder in a repo, and when it changes it downloads the new version (or builds it
+from source on this computer), closes the running program, replaces the files and starts the program
+again — automatically, from the system tray.
 
 Built with C# / WPF on .NET 8.
 
@@ -14,8 +14,13 @@ Built with C# / WPF on .NET 8.
 - **Multiple targets** – add as many repo → program pairs as you like, each with its own settings. Enable, duplicate or remove them from the list.
 - **GitHub as the update source** – pick any owner, repository, branch and path (a single file or a whole folder).
 - **Local repository folder (no internet)** – update from a copy of the repository on disk (a clone, a USB drive, a network share) with the same safe install flow.
+- **Build from source (optional)** – keep the source in a folder of its own, run your own build commands (cmd, Windows PowerShell or PowerShell 7) with the compilers on this computer and install the build output. Templates for .NET, MSBuild, Node.js, PyInstaller, Rust, Go and CMake, project detection, environment variables, a time limit and a build log. A failed build never touches the installed program.
+- **Versioned program names** – write `*` in place of the version (`ZapZap-*-windows-x86_64.exe`): the running version is closed, the new release keeps its own name and the previous exe is removed.
+- **Pick instead of typing** – fill in the release file and the program from the latest release's file list, from the running programs or with **Browse...**; the version in the name becomes `*` automatically.
 - **After-update actions per target** – start the program again and/or refresh the active Microsoft Edge tab (F5).
+- **Light and dark theme** – follows the Windows setting, or always light or dark, title bar included.
 - **Windows and console programs** – start arguments, and for console apps: show the window, keep it open after exit, or run hidden with the output written to a log file. Console apps are closed with Ctrl+C before an update.
+- **Multron server options (for Multron developers)** – hidden until **General → Multron developers → Show Multron server options** is turned on; the dashboard address and scan wait time can be set once there for every target:
 - **Multron server maintenance** – for a Multron / VirusKov cloud scan server target, the server is switched to its "Updating server" maintenance mode through its local dashboard before it is closed: clients are told the server is being updated and scans in progress finish first. The updated server starts with scans open again.
 - **Multron server signature reload** – when an update changes no program files (.exe / .dll), the files are replaced while the server keeps running and its signatures are reloaded through its dashboard instead of restarting it. If a file is held open by the server, it is closed and started as usual.
 - **Multron server seamless update** – the server is not closed for the update. Files it holds open (its exe) are renamed to `*.old-<time>`, the new files are put in place and the new version is started with `--handoff` next to the running server. The running server keeps scanning in its "Getting updated" mode while the new one loads its engine; then it finishes the scans in progress (up to the "wait up to … s for scans" setting), hands its ports over and exits, and the new version is scanning again within about a second. If the new version does not take over (it crashed, or did not load within `ServerSeamlessMinutes`, 20 by default), the previous files are put back and the running server stays as it was. A server too old for it is updated the usual way once; the renamed `*.old-*` files are deleted after the switch (or on the next update).
@@ -47,7 +52,8 @@ Built with C# / WPF on .NET 8.
    `https://github.com/user/repo/blob/main/bin/Release/App.exe` and click **Fill from link**,
    or enter *Owner*, *Repository*, *Branch* and *Path in repository* by hand.
 4. **Program on this computer** – choose the target folder and, optionally, the `.exe` that
-   should be closed while the files are replaced.
+   should be closed while the files are replaced (**Running...** picks it from the running programs).
+   To compile the program yourself, turn on **Build from source** and enter the build commands.
 5. **After updating** – choose whether to start the program again and/or refresh the active Edge tab.
 6. Click **Check this target** to run the first update. Repeat for more targets.
 7. In the **General** tab, turn on **Update automatically** to keep every enabled target updated in the background.
@@ -87,7 +93,8 @@ empty = the whole folder), so `OpenMalwareScannerPortable` keeps a Multron serve
 **Release file(s) to install** takes a file name, wildcards (`MyApp-*-win64.zip`) or several names separated by `;`.
 When it is empty, the name of the program (or of the file in *Path in repository*) is used. A single `.exe` asset is installed
 under the program's name, and `.zip` assets are extracted into the target folder (a single top folder inside the zip is skipped).
-**Show latest release** lists the files of the latest release and marks the ones that match.
+**Show latest release** lists the files of the latest release and marks the ones that match; **Use this file**
+fills in the release file (and the program, for an `.exe`) with `*` in place of the version.
 
 Checking for a new commit or a new release tag does not use the GitHub API, so frequent checks do not run into the
 60 requests/hour limit; the API is only called when something actually changed.
@@ -183,8 +190,10 @@ scan wait time set there are used by every target that keeps **Use the global se
    has changed it does not count against GitHub's rate limit.
 2. If the commit changed, reads the file list and compares each file with the local copy.
 3. Downloads the changed files (pinned to the exact commit) and verifies their hashes.
-4. Closes the program (gracefully first, forcefully after 5 seconds).
-5. Backs up and replaces the files, then runs the after-update actions (restart the program, refresh Edge).
+4. With **Build from source** on: puts the files into the source folder, runs the build commands and takes
+   the changed files of the output folder. A failed build stops here.
+5. Closes the program (gracefully first, forcefully after 5 seconds; with a `*` name, every matching copy).
+6. Backs up and replaces the files, then runs the after-update actions (restart the program, refresh Edge).
 
 Targets are checked one after another.
 
@@ -240,6 +249,7 @@ dotnet publish -c Release -o publish
 
 ## Limitations
 
-- Files deleted from the repository are not deleted locally.
+- Files deleted from the repository are not deleted locally (in the target folder or the build source folder).
+- Building uses the compilers installed on this computer; Multron Updater does not install them.
 - Files stored with Git LFS are not supported.
 - Very large repositories (100,000+ files) may return a truncated file list from GitHub.
