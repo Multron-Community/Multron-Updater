@@ -19,10 +19,35 @@ namespace MultronUpdater.Services
         public static string ConsoleLogFile(UpdateProfile p) =>
             Path.Combine(ConsoleLogFolder, string.Concat(p.DisplayName.Split(Path.GetInvalidFileNameChars())) + ".log");
 
-        public static string? ExePath(UpdateProfile p) =>
-            string.IsNullOrWhiteSpace(p.ExeName) || string.IsNullOrWhiteSpace(p.LocalFolder)
-                ? null
-                : Path.Combine(Path.GetFullPath(p.LocalFolder), p.ExeName);
+        public static string? ExePath(UpdateProfile p)
+        {
+            if (string.IsNullOrWhiteSpace(p.ExeName) || string.IsNullOrWhiteSpace(p.LocalFolder)) return null;
+            if (!HasWildcard(p.ExeName)) return Path.Combine(Path.GetFullPath(p.LocalFolder), p.ExeName.Trim());
+            return MatchingExePaths(p).FirstOrDefault();
+        }
+
+        public static bool HasWildcard(string? exeName) => exeName != null && exeName.IndexOfAny(new[] { '*', '?' }) >= 0;
+
+        public static bool MatchesExeName(UpdateProfile p, string fileName) =>
+            HasWildcard(p.ExeName) && UpdateService.MatchesPattern(Path.GetFileName(fileName), Path.GetFileName(p.ExeName.Trim()));
+
+        public static System.Collections.Generic.List<string> MatchingExePaths(UpdateProfile p)
+        {
+            var result = new System.Collections.Generic.List<string>();
+            if (!HasWildcard(p.ExeName) || string.IsNullOrWhiteSpace(p.LocalFolder)) return result;
+            var name = p.ExeName.Trim().Replace('/', Path.DirectorySeparatorChar);
+            var dir = Path.Combine(Path.GetFullPath(p.LocalFolder), Path.GetDirectoryName(name) ?? "");
+            if (!Directory.Exists(dir)) return result;
+            try
+            {
+                result.AddRange(Directory.EnumerateFiles(dir, Path.GetFileName(name))
+                    .Where(f => MatchesExeName(p, f))
+                    .OrderByDescending(File.GetLastWriteTimeUtc));
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            return result;
+        }
 
         public static bool? IsConsoleExe(string path)
         {
@@ -123,6 +148,16 @@ namespace MultronUpdater.Services
             bool console = profile.IsConsoleApp || IsConsoleExe(exePath) == true;
             await CloseProcessesAsync(profileName, name, procs, console);
             return true;
+        }
+
+        public static async Task<bool> CloseAllAsync(UpdateProfile profile, string? exePath)
+        {
+            if (!HasWildcard(profile.ExeName)) return exePath != null && await CloseAsync(profile, exePath);
+            var matches = MatchingExePaths(profile);
+            if (matches.Count == 0) { Logger.Info($"[{profile.DisplayName}] No file matching {profile.ExeName} to close."); return false; }
+            bool any = false;
+            foreach (var path in matches) any |= await CloseAsync(profile, path);
+            return any;
         }
 
         /// <summary>

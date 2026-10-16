@@ -23,7 +23,7 @@ namespace MultronUpdater.Services
 
         private static string BaseUrl(UpdateProfile p)
         {
-            var url = string.IsNullOrWhiteSpace(p.ServerDashboardUrl) ? "http://127.0.0.1:9440" : p.ServerDashboardUrl.Trim();
+            var url = string.IsNullOrWhiteSpace(p.EffectiveServerUrl) ? AppSettings.DefaultServerUrl : p.EffectiveServerUrl.Trim();
             if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                 url = "http://" + url;
             return url.TrimEnd('/');
@@ -72,7 +72,7 @@ namespace MultronUpdater.Services
             }
             Logger.Info($"[{name}] Server switched to maintenance (\"updating server\"); new scans are refused with that message.");
 
-            var limit = TimeSpan.FromSeconds(Math.Clamp(p.ServerDrainSeconds, 0, 600));
+            var limit = TimeSpan.FromSeconds(Math.Clamp(p.EffectiveServerDrainSeconds, 0, 600));
             var started = DateTime.UtcNow;
             int active = -1;
             while (DateTime.UtcNow - started < limit)

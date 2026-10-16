@@ -31,6 +31,8 @@ namespace MultronUpdater.Services
     /// disk (a clone, a USB drive, a network share) and never uses the internet. New values
     /// go at the end: settings.json stores the number.
     /// </summary>
+    public enum BuildShell { Cmd, WindowsPowerShell, PowerShell7 }
+
     public enum TargetSource { Both, Repository, Releases, LocalFolder }
 
     public class UpdateProfile : INotifyPropertyChanged
@@ -67,6 +69,22 @@ namespace MultronUpdater.Services
         [JsonIgnore] public bool UsesReleases => Source is TargetSource.Both or TargetSource.Releases;
         [JsonIgnore] public bool UsesLocalFolder => Source == TargetSource.LocalFolder;
 
+        public bool BuildEnabled { get; set; } = false;
+        public string BuildSourceFolder { get; set; } = "";
+        public BuildShell BuildShell { get; set; } = BuildShell.Cmd;
+        public string BuildCommands { get; set; } = "";
+        public string BuildWorkingDir { get; set; } = "";
+        public string BuildOutputPath { get; set; } = "";
+        public string BuildEnvironment { get; set; } = "";
+        public int BuildTimeoutMinutes { get; set; } = 30;
+        public bool BuildStopOnError { get; set; } = true;
+        public bool BuildCleanOutput { get; set; } = true;
+        public string? BuildLastSuccessKey { get; set; }
+
+        [JsonIgnore] public string EffectiveBuildSourceFolder => string.IsNullOrWhiteSpace(BuildSourceFolder)
+            ? System.IO.Path.Combine(AppSettings.DataFolder, "sources", Id)
+            : System.IO.Path.GetFullPath(Environment.ExpandEnvironmentVariables(BuildSourceFolder.Trim()));
+
         public string LocalFolder { get; set; } = "";
         public string ExeName { get; set; } = "";
         public bool IsConsoleApp { get; set; } = false;
@@ -80,9 +98,15 @@ namespace MultronUpdater.Services
 
         /// <summary>Multron cloud scan server: switch it to "updating server" maintenance before closing it.</summary>
         public bool ServerMaintenance { get; set; } = false;
-        public string ServerDashboardUrl { get; set; } = "http://127.0.0.1:9440";
+        public bool? ServerUseGlobal { get; set; }
+        public string ServerDashboardUrl { get; set; } = AppSettings.DefaultServerUrl;
         /// <summary>How long to wait for scans in progress before closing the server.</summary>
         public int ServerDrainSeconds { get; set; } = 60;
+
+        [JsonIgnore] public string EffectiveServerUrl =>
+            ServerUseGlobal != false ? AppSettings.Current.ServerDashboardUrl : ServerDashboardUrl;
+        [JsonIgnore] public int EffectiveServerDrainSeconds =>
+            ServerUseGlobal != false ? AppSettings.Current.ServerDrainSeconds : ServerDrainSeconds;
         /// <summary>
         /// Multron cloud scan server: when an update changes no program files (.exe / .dll),
         /// the files are replaced while the server keeps running and its signatures are
@@ -148,7 +172,7 @@ namespace MultronUpdater.Services
                 : $"{Owner}/{Repo} · {Branch}";
 
         [JsonIgnore]
-        public string SourceKey => $"{Owner}/{Repo}@{Branch}:{RepoPath}>{LocalFolder}|{Source}|{ReleaseAsset}|{ExtractZipAssets}|{LocalRepoFolder}".ToLowerInvariant();
+        public string SourceKey => $"{Owner}/{Repo}@{Branch}:{RepoPath}>{LocalFolder}|{Source}|{ReleaseAsset}|{ExtractZipAssets}|{LocalRepoFolder}|{(BuildEnabled ? EffectiveBuildSourceFolder : "")}".ToLowerInvariant();
 
         public string EffectiveAssetPattern()
         {
@@ -184,14 +208,22 @@ namespace MultronUpdater.Services
             {
                 if (string.IsNullOrWhiteSpace(LocalRepoFolder)) { error = "Local repository folder is empty."; return false; }
                 if (string.IsNullOrWhiteSpace(LocalFolder)) { error = "Local target folder is empty."; return false; }
-                error = "";
-                return true;
+                return BuildIsConfigured(out error);
             }
             if (string.IsNullOrWhiteSpace(Owner) || string.IsNullOrWhiteSpace(Repo)) { error = "GitHub owner/repository is empty."; return false; }
             if (UsesRepository && string.IsNullOrWhiteSpace(Branch)) { error = "Branch is empty."; return false; }
-            if (UsesRepository && string.IsNullOrWhiteSpace(RepoPath)) { error = "Path in repository is empty."; return false; }
+            if (UsesRepository && !BuildEnabled && string.IsNullOrWhiteSpace(RepoPath)) { error = "Path in repository is empty."; return false; }
             if (string.IsNullOrWhiteSpace(LocalFolder)) { error = "Local target folder is empty."; return false; }
+            return BuildIsConfigured(out error);
+        }
+
+        private bool BuildIsConfigured(out string error)
+        {
             error = "";
+            if (!BuildEnabled) return true;
+            if (Source == TargetSource.Releases) { error = "Building from source needs the repository or a local repository folder as the update source."; return false; }
+            if (string.IsNullOrWhiteSpace(BuildCommands)) { error = "Build commands are empty."; return false; }
+            if (string.IsNullOrWhiteSpace(BuildOutputPath)) { error = "Build output folder is empty."; return false; }
             return true;
         }
 
@@ -205,6 +237,8 @@ namespace MultronUpdater.Services
             copy.Name = DisplayName + " (copy)";
             copy.LastCommitSha = null;
             copy.LastUpdateTime = null;
+            copy.BuildLastSuccessKey = null;
+            if (!string.IsNullOrWhiteSpace(copy.BuildSourceFolder)) copy.BuildSourceFolder = "";
             return copy;
         }
     }
@@ -212,6 +246,16 @@ namespace MultronUpdater.Services
     public class AppSettings
     {
         public List<UpdateProfile> Profiles { get; set; } = new();
+
+        public const string DefaultServerUrl = "http://127.0.0.1:9440";
+
+        [JsonIgnore] public static AppSettings Current { get; private set; } = new();
+
+        public AppTheme Theme { get; set; } = AppTheme.System;
+
+        public bool MultronDeveloperOptions { get; set; } = false;
+        public string ServerDashboardUrl { get; set; } = DefaultServerUrl;
+        public int ServerDrainSeconds { get; set; } = 60;
 
         public bool AutoUpdateEnabled { get; set; } = false;
         public int CheckIntervalMinutes { get; set; } = 5;
@@ -259,6 +303,10 @@ namespace MultronUpdater.Services
             }
 
             if (s.Profiles.Count == 0) s.Profiles.Add(new UpdateProfile { Name = "My program" });
+            foreach (var p in s.Profiles.Where(p => p.ServerUseGlobal == null))
+                p.ServerUseGlobal = string.Equals(p.ServerDashboardUrl.Trim(), s.ServerDashboardUrl.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                                    p.ServerDrainSeconds == s.ServerDrainSeconds;
+            Current = s;
             return s;
         }
 

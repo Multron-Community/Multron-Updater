@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Multron Updater" Width="1040" Height="760" MinWidth="860" MinHeight="560"
-        WindowStartupLocation="CenterScreen" Background="{StaticResource BgBrush}"
+        WindowStartupLocation="CenterScreen" Background="{DynamicResource BgBrush}"
         Icon="/Assets/app.ico" FontFamily="Segoe UI" FontSize="13">
 
     <Window.TaskbarItemInfo>
@@ -14,7 +14,7 @@
     </Window.Resources>
 
     <DockPanel>
-        <Border DockPanel.Dock="Top" Background="{StaticResource HeaderBrush}" Padding="20,14">
+        <Border DockPanel.Dock="Top" Background="{DynamicResource HeaderBrush}" Padding="20,14">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -37,7 +37,7 @@
             </Grid>
         </Border>
 
-        <Border DockPanel.Dock="Bottom" Background="White" BorderBrush="{StaticResource BorderBrush}"
+        <Border DockPanel.Dock="Bottom" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,1,0,0" Padding="20,10">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -45,13 +45,13 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                    <TextBlock x:Name="StatusText" Text="Ready" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                    <TextBlock x:Name="StatusText" Text="Ready" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}"
                                TextTrimming="CharacterEllipsis"/>
-                    <TextBlock x:Name="StatusDetail" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                    <TextBlock x:Name="StatusDetail" Foreground="{DynamicResource MutedBrush}" FontSize="12"
                                TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <TextBlock x:Name="SavedText" Foreground="{StaticResource AccentDarkBrush}" FontWeight="SemiBold"
+                    <TextBlock x:Name="SavedText" Foreground="{DynamicResource AccentDarkBrush}" FontWeight="SemiBold"
                                VerticalAlignment="Center" Margin="0,0,12,0"
                                ToolTip="Settings are saved automatically when you change them"/>
                     <Button x:Name="CheckAllButton" Content="Check all now" Margin="0,0,8,0" Click="CheckAllButton_Click"
@@ -61,7 +61,7 @@
             </Grid>
         </Border>
         <ProgressBar x:Name="BusyBar" DockPanel.Dock="Bottom" Height="3" IsIndeterminate="True" Visibility="Collapsed"
-                     Foreground="{StaticResource AccentBrush}" Background="Transparent" BorderThickness="0"/>
+                     Foreground="{DynamicResource AccentBrush}" Background="Transparent" BorderThickness="0"/>
 
         <TabControl x:Name="Tabs" Margin="20,10,20,0" Background="Transparent" BorderThickness="0" Padding="0,12,0,0">
 
@@ -98,10 +98,10 @@
                                                     </Border>
                                                     <ControlTemplate.Triggers>
                                                         <Trigger Property="IsMouseOver" Value="True">
-                                                            <Setter TargetName="bd" Property="Background" Value="#F3F5F7"/>
+                                                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverBrush}"/>
                                                         </Trigger>
                                                         <Trigger Property="IsSelected" Value="True">
-                                                            <Setter TargetName="bd" Property="Background" Value="#DAFBE1"/>
+                                                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SuccessBgBrush}"/>
                                                         </Trigger>
                                                     </ControlTemplate.Triggers>
                                                 </ControlTemplate>
@@ -116,19 +116,19 @@
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <Ellipse x:Name="dot" Width="9" Height="9" Fill="#2EA043" VerticalAlignment="Top" Margin="0,5,0,0"/>
+                                            <Ellipse x:Name="dot" Width="9" Height="9" Fill="{DynamicResource AccentBrush}" VerticalAlignment="Top" Margin="0,5,0,0"/>
                                             <StackPanel Grid.Column="1" Margin="9,0,0,0">
-                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="#1F2328"
+                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}"
                                                            TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock Text="{Binding SourceText}" FontSize="11.5" Foreground="#656D76"
+                                                <TextBlock Text="{Binding SourceText}" FontSize="11.5" Foreground="{DynamicResource MutedBrush}"
                                                            TextTrimming="CharacterEllipsis"/>
-                                                <TextBlock x:Name="status" Text="{Binding Status}" FontSize="11" Foreground="#656D76"
+                                                <TextBlock x:Name="status" Text="{Binding Status}" FontSize="11" Foreground="{DynamicResource MutedBrush}"
                                                            TextTrimming="CharacterEllipsis"/>
                                             </StackPanel>
                                         </Grid>
                                         <DataTemplate.Triggers>
                                             <DataTrigger Binding="{Binding Enabled}" Value="False">
-                                                <Setter TargetName="dot" Property="Fill" Value="#C9D1D9"/>
+                                                <Setter TargetName="dot" Property="Fill" Value="{DynamicResource TrackOffBrush}"/>
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding Status}" Value="">
                                                 <Setter TargetName="status" Property="Visibility" Value="Collapsed"/>
@@ -218,20 +218,20 @@
                                     <TextBlock Text="Update source" Style="{StaticResource FieldLabel}" Margin="0,10,0,4"/>
                                     <StackPanel>
                                         <RadioButton x:Name="SourceBothRadio" GroupName="UpdateSource" Margin="0,2,0,0" Checked="Source_Changed">
-                                            <TextBlock TextWrapping="Wrap"><Run Text="Repository files + releases" FontWeight="SemiBold"/><Run Text="  (default) – sees a push right away; new releases add the files the repository does not have" Foreground="#656D76"/></TextBlock>
+                                            <TextBlock TextWrapping="Wrap"><Run Text="Repository files + releases" FontWeight="SemiBold"/><Run Text="  (default) – sees a push right away; new releases add the files the repository does not have" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
                                         </RadioButton>
                                         <RadioButton x:Name="SourceRepoRadio" GroupName="UpdateSource" Margin="0,4,0,0" Checked="Source_Changed">
-                                            <TextBlock TextWrapping="Wrap"><Run Text="Repository files only" FontWeight="SemiBold"/><Run Text="  – raw files from the branch, checked with their hash; a &lt;file&gt;.sha256 next to a file is verified too" Foreground="#656D76"/></TextBlock>
+                                            <TextBlock TextWrapping="Wrap"><Run Text="Repository files only" FontWeight="SemiBold"/><Run Text="  – raw files from the branch, checked with their hash; a &lt;file&gt;.sha256 next to a file is verified too" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
                                         </RadioButton>
                                         <RadioButton x:Name="SourceReleasesRadio" GroupName="UpdateSource" Margin="0,4,0,0" Checked="Source_Changed">
-                                            <TextBlock TextWrapping="Wrap"><Run Text="Releases only" FontWeight="SemiBold"/><Run Text="  – installs the files of the latest GitHub release, verified with SHA-256" Foreground="#656D76"/></TextBlock>
+                                            <TextBlock TextWrapping="Wrap"><Run Text="Releases only" FontWeight="SemiBold"/><Run Text="  – installs the files of the latest GitHub release, verified with SHA-256" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
                                         </RadioButton>
                                         <RadioButton x:Name="SourceLocalRadio" GroupName="UpdateSource" Margin="0,4,0,0" Checked="Source_Changed">
-                                            <TextBlock TextWrapping="Wrap"><Run Text="Local repository folder (no internet)" FontWeight="SemiBold"/><Run Text="  – a copy of the repository on this computer, a USB drive or a share; files are compared with SHA-256" Foreground="#656D76"/></TextBlock>
+                                            <TextBlock TextWrapping="Wrap"><Run Text="Local repository folder (no internet)" FontWeight="SemiBold"/><Run Text="  – a copy of the repository on this computer, a USB drive or a share; files are compared with SHA-256" Foreground="{DynamicResource MutedBrush}"/></TextBlock>
                                         </RadioButton>
                                     </StackPanel>
 
-                                    <Border x:Name="LocalOptions" Background="#F6F8FA" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                    <Border x:Name="LocalOptions" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                                             CornerRadius="6" Padding="12,8" Margin="0,10,0,0" Visibility="Collapsed">
                                         <StackPanel>
                                             <TextBlock Text="Local repository folder" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
@@ -249,7 +249,7 @@
                                         </StackPanel>
                                     </Border>
 
-                                    <Border x:Name="ReleaseOptions" Background="#F6F8FA" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                    <Border x:Name="ReleaseOptions" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                                             CornerRadius="6" Padding="12,8" Margin="0,10,0,0">
                                         <StackPanel>
                                             <TextBlock Text="Release file(s) to install" Style="{StaticResource FieldLabel}" Margin="0,0,0,3"/>
@@ -265,6 +265,27 @@
                                             <TextBlock x:Name="AssetHint" Style="{StaticResource Hint}"/>
                                             <CheckBox x:Name="ExtractZipCheck" Content="Extract .zip files into the target folder" Margin="0,8,0,0"/>
                                             <TextBlock x:Name="ReleaseInfoText" Style="{StaticResource Hint}" Margin="0,6,0,0"/>
+                                            <ItemsControl x:Name="ReleaseAssetList" Margin="0,4,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="0,2,0,0">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="18"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding Mark}" Foreground="{DynamicResource SuccessFgBrush}" VerticalAlignment="Center"/>
+                                                            <TextBlock Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                                                <Run Text="{Binding Name, Mode=OneWay}" FontFamily="Cascadia Mono, Consolas" Foreground="{DynamicResource TextBrush}"/>
+                                                                <Run Text="{Binding Info, Mode=OneWay}" Foreground="{DynamicResource MutedBrush}"/>
+                                                            </TextBlock>
+                                                            <Button Grid.Column="2" Content="Use this file" Padding="10,3" FontSize="12" Margin="8,0,0,0"
+                                                                    Tag="{Binding}" Click="UseReleaseAsset_Click"
+                                                                    ToolTip="Fill in the release file (and the program, for an .exe) with * in place of the version"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
                                         </StackPanel>
                                     </Border>
 
@@ -296,12 +317,15 @@
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBox x:Name="ExeBox"/>
-                                        <Button Grid.Column="1" Content="Browse..." Margin="8,0,0,0" Click="BrowseExe_Click"/>
+                                        <Button Grid.Column="1" x:Name="RunningButton" Content="Running..." Margin="8,0,0,0" Click="PickRunning_Click"
+                                                ToolTip="Pick a running program (e.g. the server to close); the folder and the program are filled in with * in place of the version"/>
+                                        <Button Grid.Column="2" Content="Browse..." Margin="8,0,0,0" Click="BrowseExe_Click"/>
                                     </Grid>
                                     <TextBlock Style="{StaticResource Hint}"
-                                               Text="This program is closed before the files are replaced and started again afterwards (if chosen)."/>
+                                               Text="This program is closed before the files are replaced and started again afterwards (if chosen). Use * for the version in versioned names, e.g. App-*-win64.exe: the running version is closed, the new release keeps its own name and the previous exe is removed."/>
 
                                     <TextBlock Text="Program type" Style="{StaticResource FieldLabel}" Margin="0,10,0,4"/>
                                     <StackPanel Orientation="Horizontal">
@@ -309,7 +333,7 @@
                                                      VerticalContentAlignment="Center" Checked="ProgramType_Changed"/>
                                         <RadioButton x:Name="ConsoleAppRadio" GroupName="ProgramType" Content="Console app"
                                                      VerticalContentAlignment="Center" Checked="ProgramType_Changed"/>
-                                        <TextBlock x:Name="DetectedTypeText" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                                        <TextBlock x:Name="DetectedTypeText" Foreground="{DynamicResource MutedBrush}" FontSize="12"
                                                    VerticalAlignment="Center" Margin="16,0,0,0"/>
                                     </StackPanel>
                                     <CheckBox x:Name="NoAdminCheck" Margin="0,8,0,0"
@@ -329,7 +353,7 @@
                                                 ToolTip="Start the program now with these settings (to try them out)"/>
                                     </Grid>
 
-                                    <Border x:Name="ConsoleOptions" Background="#F6F8FA" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                    <Border x:Name="ConsoleOptions" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                                             CornerRadius="6" Padding="12,8" Margin="0,10,0,0">
                                         <StackPanel>
                                             <TextBlock Text="Console window" FontWeight="SemiBold" Margin="0,0,0,2"/>
@@ -344,6 +368,7 @@
                                         </StackPanel>
                                     </Border>
 
+                                    <StackPanel x:Name="DevServerPanel" Visibility="Collapsed">
                                     <CheckBox x:Name="ServerMaintCheck" Margin="0,10,0,0"
                                               Content="Multron server: switch it to &quot;Updating server&quot; maintenance before closing it"/>
                                     <CheckBox x:Name="ServerReloadCheck" Margin="0,6,0,0"
@@ -353,7 +378,9 @@
                                               Content="Multron server: seamless update (the new version loads next to the running server; scans continue)"
                                               ToolTip="The running exe is renamed (*.old-&lt;time&gt;), the new files are put in place and the new version is started with --handoff. The running server keeps scanning (&quot;Getting updated&quot;) until the new one has loaded its engine, then hands its ports over in a few seconds. If the new version does not take over, the previous files are put back and the running server stays. A server too old for it is updated the usual way once."/>
                                     <StackPanel x:Name="ServerMaintPanel" Margin="22,6,0,0">
-                                        <Grid>
+                                        <CheckBox x:Name="ServerUseGlobalCheck" Margin="0,0,0,6"
+                                                  Content="Use the global server settings (General → Multron developers)"/>
+                                        <Grid x:Name="ServerOwnGrid">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
@@ -371,8 +398,98 @@
                                         <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,0"
                                                    Text="Clients are told &quot;Under maintenance: the server is being updated&quot; instead of losing the connection without a word, and scans in progress finish first. The updated server starts with scans open again; a normal maintenance mode that was on stays on. If the server is not running, the update goes on as usual."/>
                                     </StackPanel>
+                                    </StackPanel>
 
                                     <CheckBox x:Name="BackupCheck" Content="Keep a backup of replaced files (last 3 updates)" Margin="0,10,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Build from source (optional)" Style="{StaticResource CardTitle}"/>
+                                    <CheckBox x:Name="BuildEnabledCheck" Margin="0,0,0,0"
+                                              Content="Build the program from the downloaded source before installing it"/>
+                                    <TextBlock Style="{StaticResource Hint}"
+                                               Text="The repository (or the local repository folder) is kept in a source folder, your build commands run there with the compilers installed on this computer, and the files of the output folder are installed into the target folder. A failed build never touches the installed program. Leave &quot;Path in repository&quot; empty to download the whole repository."/>
+
+                                    <StackPanel x:Name="BuildPanel" Margin="0,8,0,0" Visibility="Collapsed">
+                                        <TextBlock Text="Source folder (where the source is kept and built)" Style="{StaticResource FieldLabel}"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox x:Name="BuildSourceBox" FontFamily="Cascadia Mono, Consolas"
+                                                     ToolTip="Empty = %AppData%\MultronUpdater\sources\&lt;target id&gt;"/>
+                                            <Button Grid.Column="1" Content="Browse..." Margin="8,0,0,0" Click="BrowseBuildSource_Click"/>
+                                            <Button Grid.Column="2" Content="Open" Margin="8,0,0,0" Click="OpenBuildSource_Click"/>
+                                        </Grid>
+                                        <TextBlock x:Name="BuildSourceHint" Style="{StaticResource Hint}"/>
+
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="200"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Shell" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource TextBrush}"/>
+                                            <ComboBox x:Name="BuildShellBox" Grid.Column="1" SelectedIndex="0">
+                                                <ComboBoxItem Content="Command Prompt (cmd)"/>
+                                                <ComboBoxItem Content="Windows PowerShell"/>
+                                                <ComboBoxItem Content="PowerShell 7 (pwsh)"/>
+                                            </ComboBox>
+                                            <ComboBox x:Name="BuildTemplateBox" Grid.Column="3" Width="250" Margin="8,0,0,0"
+                                                      ToolTip="Fills in the shell, commands and output folder; edit them afterwards"/>
+                                            <Button Grid.Column="4" Content="Detect" Margin="8,0,0,0" Click="DetectBuild_Click"
+                                                    ToolTip="Pick a template from the files in the source folder (.csproj, package.json, Cargo.toml...)"/>
+                                        </Grid>
+
+                                        <TextBlock Text="Build commands (one per line; they run in one shell, so cd and set carry over)" Style="{StaticResource FieldLabel}" Margin="0,10,0,3"/>
+                                        <TextBox x:Name="BuildCommandsBox" AcceptsReturn="True" AcceptsTab="True" TextWrapping="NoWrap" MinHeight="110" MaxHeight="260"
+                                                 VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                                 FontFamily="Cascadia Mono, Consolas" FontSize="12.5"/>
+                                        <TextBlock Style="{StaticResource Hint}"
+                                                   Text="Variables: %MU_SOURCE% (source folder), %MU_OUTPUT% (output folder), %MU_TARGET% (target folder), %MU_VERSION% (commit), %MU_EXE%, %MU_TARGET_NAME% — in PowerShell: $env:MU_SOURCE ..."/>
+
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="Output folder (relative to the source folder)" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox x:Name="BuildOutputBox" FontFamily="Cascadia Mono, Consolas"
+                                                         ToolTip="Its files are installed into the target folder, e.g. publish or bin\Release\net8.0-windows\win-x64\publish"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Text="Working folder (relative, optional)" Style="{StaticResource FieldLabel}"/>
+                                                <TextBox x:Name="BuildWorkDirBox" FontFamily="Cascadia Mono, Consolas"
+                                                         ToolTip="Folder the commands start in; empty = the source folder"/>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <TextBlock Text="Environment variables (optional, one NAME=value per line)" Style="{StaticResource FieldLabel}" Margin="0,8,0,3"/>
+                                        <TextBox x:Name="BuildEnvBox" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="44" MaxHeight="120"
+                                                 VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="12.5"/>
+
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <TextBlock Text="Stop the build after" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource TextBrush}"/>
+                                            <TextBox x:Name="BuildTimeoutBox" Width="60"/>
+                                            <TextBlock Text="minutes" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource TextBrush}"/>
+                                        </StackPanel>
+                                        <CheckBox x:Name="BuildStopOnErrorCheck" Content="Stop at the first command that fails (exit code not 0)" Margin="0,8,0,0"/>
+                                        <CheckBox x:Name="BuildCleanCheck" Content="Empty the output folder before each build"/>
+
+                                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                            <Button x:Name="BuildNowButton" Content="Build and install now" Style="{StaticResource PrimaryButton}" Click="BuildNow_Click"
+                                                    ToolTip="Downloads the changes (if any), builds and installs, even when the source has not changed"/>
+                                            <Button Content="Open build log" Margin="8,0,0,0" Click="OpenBuildLog_Click"/>
+                                        </StackPanel>
+                                    </StackPanel>
                                 </StackPanel>
                             </Border>
 
@@ -392,7 +509,7 @@
                                         </Grid.ColumnDefinitions>
                                         <Grid>
                                             <TextBox x:Name="FileFilterBox" TextChanged="FileFilter_Changed"/>
-                                            <TextBlock Text="Filter files..." Foreground="#8C959F" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                            <TextBlock Text="Filter files..." Foreground="{DynamicResource PlaceholderBrush}" Margin="10,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
                                                         <Setter Property="Visibility" Value="Collapsed"/>
@@ -415,11 +532,11 @@
                                     <ItemsControl x:Name="GroupsList">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Border x:Name="groupBorder" Tag="{Binding}" BorderBrush="#D9DEE3" BorderThickness="1"
-                                                        CornerRadius="6" Margin="0,0,0,8" Background="White">
+                                                <Border x:Name="groupBorder" Tag="{Binding}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                                        CornerRadius="6" Margin="0,0,0,8" Background="{DynamicResource CardBrush}">
                                                     <DockPanel>
-                                                        <Border DockPanel.Dock="Top" Background="#F6F8FA" CornerRadius="6,6,0,0" Padding="8,6"
-                                                                BorderBrush="#D9DEE3" BorderThickness="0,0,0,1">
+                                                        <Border DockPanel.Dock="Top" Background="{DynamicResource SubtleBrush}" CornerRadius="6,6,0,0" Padding="8,6"
+                                                                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
                                                             <StackPanel>
                                                                 <Grid>
                                                                     <Grid.ColumnDefinitions>
@@ -435,7 +552,7 @@
                                                                             <ControlTemplate TargetType="ToggleButton">
                                                                                 <Border Background="Transparent">
                                                                                     <TextBlock x:Name="arrow" Text="&#xE76C;" FontFamily="Segoe MDL2 Assets" FontSize="10"
-                                                                                               HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#656D76"/>
+                                                                                               HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}"/>
                                                                                 </Border>
                                                                                 <ControlTemplate.Triggers>
                                                                                     <Trigger Property="IsChecked" Value="True">
@@ -449,10 +566,10 @@
                                                                               VerticalAlignment="Center" ToolTip="Check or uncheck every file in this group"/>
                                                                     <TextBox Grid.Column="2" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" FontWeight="SemiBold"
                                                                              BorderThickness="0" Background="Transparent" Padding="2,1" ToolTip="Group name (click to rename)"/>
-                                                                    <TextBlock Grid.Column="3" Text="{Binding CountText}" Foreground="#656D76" FontSize="11.5"
+                                                                    <TextBlock Grid.Column="3" Text="{Binding CountText}" Foreground="{DynamicResource MutedBrush}" FontSize="11.5"
                                                                                VerticalAlignment="Center" Margin="8,0"/>
                                                                     <Button Grid.Column="4" Content="&#xE74D;" FontFamily="Segoe MDL2 Assets" FontSize="11" Padding="7,4"
-                                                                            Background="Transparent" BorderBrush="Transparent" Foreground="#656D76"
+                                                                            Background="Transparent" BorderBrush="Transparent" Foreground="{DynamicResource MutedBrush}"
                                                                             Tag="{Binding}" Click="RemoveGroup_Click" ToolTip="Delete this group"/>
                                                                 </Grid>
                                                                 <StackPanel Orientation="Horizontal" Margin="32,4,0,0">
@@ -480,7 +597,7 @@
                                                                             </Grid.ColumnDefinitions>
                                                                             <CheckBox IsChecked="{Binding Include}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                                                                             <TextBlock Grid.Column="1" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
-                                                                                <Run Text="{Binding Folder, Mode=OneWay}" Foreground="#8C959F"/><Run Text="{Binding Name, Mode=OneWay}" Foreground="#1F2328"/>
+                                                                                <Run Text="{Binding Folder, Mode=OneWay}" Foreground="{DynamicResource PlaceholderBrush}"/><Run Text="{Binding Name, Mode=OneWay}" Foreground="{DynamicResource TextBrush}"/>
                                                                             </TextBlock>
                                                                             <Border Grid.Column="2" x:Name="badge" Width="16" Height="16" CornerRadius="3" BorderThickness="1.5"
                                                                                     BorderBrush="Transparent" Margin="8,0,0,0" ToolTip="{Binding StateText}" Background="Transparent">
@@ -491,27 +608,27 @@
                                                                     </Border>
                                                                     <DataTemplate.Triggers>
                                                                         <Trigger SourceName="row" Property="IsMouseOver" Value="True">
-                                                                            <Setter TargetName="row" Property="Background" Value="#F6F8FA"/>
+                                                                            <Setter TargetName="row" Property="Background" Value="{DynamicResource SubtleBrush}"/>
                                                                         </Trigger>
                                                                         <DataTrigger Binding="{Binding State}" Value="Changed">
-                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="#BF8700"/>
+                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="{DynamicResource ChangedBrush}"/>
                                                                             <Setter TargetName="glyph" Property="Text" Value="•"/>
-                                                                            <Setter TargetName="glyph" Property="Foreground" Value="#BF8700"/>
+                                                                            <Setter TargetName="glyph" Property="Foreground" Value="{DynamicResource ChangedBrush}"/>
                                                                         </DataTrigger>
                                                                         <DataTrigger Binding="{Binding State}" Value="New">
-                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="#1A7F37"/>
+                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="{DynamicResource SuccessFgBrush}"/>
                                                                             <Setter TargetName="glyph" Property="Text" Value="+"/>
-                                                                            <Setter TargetName="glyph" Property="Foreground" Value="#1A7F37"/>
+                                                                            <Setter TargetName="glyph" Property="Foreground" Value="{DynamicResource SuccessFgBrush}"/>
                                                                         </DataTrigger>
                                                                         <DataTrigger Binding="{Binding State}" Value="NotOnGitHub">
-                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="#CF222E"/>
+                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="{DynamicResource ErrorFgBrush}"/>
                                                                             <Setter TargetName="glyph" Property="Text" Value="−"/>
-                                                                            <Setter TargetName="glyph" Property="Foreground" Value="#CF222E"/>
+                                                                            <Setter TargetName="glyph" Property="Foreground" Value="{DynamicResource ErrorFgBrush}"/>
                                                                         </DataTrigger>
                                                                         <DataTrigger Binding="{Binding State}" Value="UpToDate">
-                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="#D0D7DE"/>
+                                                                            <Setter TargetName="badge" Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
                                                                             <Setter TargetName="glyph" Property="Text" Value="✓"/>
-                                                                            <Setter TargetName="glyph" Property="Foreground" Value="#8C959F"/>
+                                                                            <Setter TargetName="glyph" Property="Foreground" Value="{DynamicResource PlaceholderBrush}"/>
                                                                         </DataTrigger>
                                                                     </DataTemplate.Triggers>
                                                                 </DataTemplate>
@@ -521,8 +638,8 @@
                                                 </Border>
                                                 <DataTemplate.Triggers>
                                                     <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
-                                                        <Setter TargetName="groupBorder" Property="BorderBrush" Value="#2EA043"/>
-                                                        <Setter TargetName="groupBorder" Property="Background" Value="#F0FFF4"/>
+                                                        <Setter TargetName="groupBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                                                        <Setter TargetName="groupBorder" Property="Background" Value="{DynamicResource DropHighlightBrush}"/>
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding Enabled}" Value="False">
                                                         <Setter TargetName="groupBorder" Property="Opacity" Value="0.6"/>
@@ -533,10 +650,10 @@
                                     </ItemsControl>
 
                                     <Grid x:Name="DropZone" Height="58" Margin="0,2,0,0">
-                                        <Rectangle Stroke="#AFB8C1" StrokeThickness="1.5" StrokeDashArray="4 3" RadiusX="6" RadiusY="6" Fill="#FAFBFC"/>
+                                        <Rectangle Stroke="{DynamicResource DropStrokeBrush}" StrokeThickness="1.5" StrokeDashArray="4 3" RadiusX="6" RadiusY="6" Fill="{DynamicResource DropBgBrush}"/>
                                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                            <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="#656D76" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                                            <TextBlock Foreground="#656D76" VerticalAlignment="Center" TextWrapping="Wrap">
+                                            <TextBlock Text="&#xE896;" FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{DynamicResource MutedBrush}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                            <TextBlock Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap">
                                                 <Run Text="Drag files or folders here from File Explorer" FontWeight="SemiBold"/>
                                                 <LineBreak/>
                                                 <Run Text="Drop them onto a group to add them there. They must be inside the target folder." FontSize="11.5"/>
@@ -573,7 +690,7 @@
                                     <StackPanel>
                                         <TextBlock Text="Update automatically" FontWeight="SemiBold" FontSize="13.5"/>
                                         <TextBlock Text="When a file changes on GitHub, it is downloaded and installed in the background for every enabled target."
-                                                   Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap"/>
+                                                   Foreground="{DynamicResource MutedBrush}" FontSize="12" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </CheckBox>
 
@@ -592,10 +709,45 @@
                                 <TextBlock Text="Application" Style="{StaticResource CardTitle}"/>
                                 <CheckBox x:Name="StartupCheck" Content="Start Multron Updater with Windows" Margin="0,0,0,0"/>
                                 <CheckBox x:Name="MinimizedCheck" Content="Start hidden in the tray when started with Windows"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="{DynamicResource TextBrush}"/>
+                                    <ComboBox x:Name="ThemeBox" Width="190" SelectedIndex="0">
+                                        <ComboBoxItem Content="Use the Windows setting"/>
+                                        <ComboBoxItem Content="Light"/>
+                                        <ComboBoxItem Content="Dark"/>
+                                    </ComboBox>
+                                </StackPanel>
                                 <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0"
                                            Text="Closing this window keeps Multron Updater running in the system tray. Use the tray icon menu to exit."/>
                                 <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,0"
                                            Text="Settings are saved automatically as you change them."/>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock Text="Multron developers" Style="{StaticResource CardTitle}"/>
+                                <CheckBox x:Name="DevOptionsCheck" Content="Show Multron server options" Margin="0,0,0,0"/>
+                                <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
+                                           Text="Only for Multron developers: adds the Multron server options (maintenance mode, signature reload, seamless update) to each target's &quot;Program on this computer&quot; section."/>
+                                <StackPanel x:Name="DevGlobalPanel" Margin="0,10,0,0" Visibility="Collapsed">
+                                    <TextBlock Text="Global server settings (used by every target that keeps &quot;Use the global server settings&quot;)" Style="{StaticResource FieldLabel}"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="60"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Server dashboard" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox x:Name="GlobalServerUrlBox" Grid.Column="1" FontFamily="Cascadia Mono, Consolas"
+                                                 ToolTip="The server's dashboard address on this computer (its --ui address), e.g. http://127.0.0.1:9440"/>
+                                        <TextBlock Grid.Column="2" Text="Wait up to" VerticalAlignment="Center" Margin="12,0,8,0"/>
+                                        <TextBox x:Name="GlobalDrainBox" Grid.Column="3" ToolTip="Seconds to wait for scans in progress (0-600)"/>
+                                        <TextBlock Grid.Column="4" Text="s for scans" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                    </Grid>
+                                </StackPanel>
                             </StackPanel>
                         </Border>
 
@@ -609,7 +761,7 @@
                                     </Grid.ColumnDefinitions>
                                     <StackPanel VerticalAlignment="Center">
                                         <TextBlock x:Name="VersionText" FontWeight="SemiBold" FontSize="13.5"/>
-                                        <TextBlock x:Name="SelfStatusText" Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="SelfStatusText" Foreground="{DynamicResource MutedBrush}" FontSize="12" TextWrapping="Wrap"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                         <Button x:Name="SelfInstallButton" Content="Install update" Style="{StaticResource PrimaryButton}"
@@ -645,7 +797,7 @@
                         </ComboBox>
                         <Grid Grid.Column="1" Width="220" Margin="8,0,0,0">
                             <TextBox x:Name="SearchBox" TextChanged="LogFilter_Changed"/>
-                            <TextBlock Text="Search logs..." Foreground="#8C959F" Margin="10,0,0,0" VerticalAlignment="Center"
+                            <TextBlock Text="Search logs..." Foreground="{DynamicResource PlaceholderBrush}" Margin="10,0,0,0" VerticalAlignment="Center"
                                        IsHitTestVisible="False">
                                 <TextBlock.Style>
                                     <Style TargetType="TextBlock">
@@ -667,7 +819,7 @@
                         </StackPanel>
                     </Grid>
 
-                    <Border Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8">
+                    <Border Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8">
                         <ListView x:Name="LogList" BorderThickness="0" Background="Transparent" FontFamily="Cascadia Mono, Consolas"
                                   FontSize="12" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                                   VirtualizingPanel.IsVirtualizing="True" Margin="2">
@@ -685,26 +837,26 @@
                                             <ColumnDefinition Width="78"/>
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding TimeText}" Foreground="#656D76"/>
+                                        <TextBlock Text="{Binding TimeText}" Foreground="{DynamicResource MutedBrush}"/>
                                         <Border Grid.Column="1" x:Name="badge" CornerRadius="3" Padding="5,0" Margin="0,0,8,0"
-                                                HorizontalAlignment="Left" Background="#DDF4FF">
+                                                HorizontalAlignment="Left" Background="{DynamicResource InfoBgBrush}">
                                             <TextBlock x:Name="lvl" Text="{Binding LevelText}" FontSize="10.5" FontWeight="SemiBold"
-                                                       Foreground="#0969DA" VerticalAlignment="Center"/>
+                                                       Foreground="{DynamicResource InfoFgBrush}" VerticalAlignment="Center"/>
                                         </Border>
-                                        <TextBlock Grid.Column="2" Text="{Binding Message}" TextWrapping="Wrap" Foreground="#1F2328"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding Message}" TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}"/>
                                     </Grid>
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding Level}" Value="Success">
-                                            <Setter TargetName="badge" Property="Background" Value="#DAFBE1"/>
-                                            <Setter TargetName="lvl" Property="Foreground" Value="#1A7F37"/>
+                                            <Setter TargetName="badge" Property="Background" Value="{DynamicResource SuccessBgBrush}"/>
+                                            <Setter TargetName="lvl" Property="Foreground" Value="{DynamicResource SuccessFgBrush}"/>
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding Level}" Value="Warning">
-                                            <Setter TargetName="badge" Property="Background" Value="#FFF8C5"/>
-                                            <Setter TargetName="lvl" Property="Foreground" Value="#9A6700"/>
+                                            <Setter TargetName="badge" Property="Background" Value="{DynamicResource WarnBgBrush}"/>
+                                            <Setter TargetName="lvl" Property="Foreground" Value="{DynamicResource WarnFgBrush}"/>
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding Level}" Value="Error">
-                                            <Setter TargetName="badge" Property="Background" Value="#FFEBE9"/>
-                                            <Setter TargetName="lvl" Property="Foreground" Value="#CF222E"/>
+                                            <Setter TargetName="badge" Property="Background" Value="{DynamicResource ErrorBgBrush}"/>
+                                            <Setter TargetName="lvl" Property="Foreground" Value="{DynamicResource ErrorFgBrush}"/>
                                         </DataTrigger>
                                     </DataTemplate.Triggers>
                                 </DataTemplate>

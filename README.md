@@ -136,6 +136,47 @@ to the window you were using. This is handy when the target is a web page or a l
 > **Tip:** For .NET apps that are not published as a single file, the `.exe` is only a small
 > launcher and the real code lives in the `.dll` next to it. Use the **folder** path in that case.
 
+### Versioned program names (`*`)
+
+Some programs put the version in the file name (`ZapZap-7.5.1-windows-x86_64.exe`). Write `*` in place of
+the version in **Program to close** (`ZapZap-*-windows-x86_64.exe`): every running copy that matches is
+closed, the new release is installed under its own name, the previous version's exe is removed (and kept
+in the backup) and the new one is started.
+
+You do not have to type it: **Show latest release** lists the release files with a **Use this file** button,
+**Running...** lists the running programs (and everything running from the target folder, such as a hidden
+server), and **Browse...** picks a file. All three fill in the fields with `*` in place of the version.
+
+### Build from source (optional)
+
+Turn on **Build the program from the downloaded source before installing it** to compile the program on
+this computer instead of downloading a ready-made exe:
+
+1. The repository (leave *Path in repository* empty for the whole repository) or the local repository
+   folder is kept in a **source folder** (default `%AppData%\MultronUpdater\sources\<target id>`).
+2. Your **build commands** run there with the compilers installed on this computer, in Command Prompt,
+   Windows PowerShell or PowerShell 7. All lines run in one shell, so `cd`, `set` and variables carry over.
+   **Stop at the first command that fails** checks the exit code after every complete command.
+3. The files of the **output folder** that differ from the installed ones are installed into the target
+   folder with the usual flow (close, back up, replace, restart).
+
+A failed or timed-out build never touches the installed program; automatic checks do not build the same
+failing version again (a manual check or a new commit does). Templates are included for .NET, MSBuild,
+Node.js, PyInstaller, Rust, Go, CMake and repository build scripts, and **Detect** picks one from the files in
+the source folder. The commands can use `%MU_SOURCE%`, `%MU_OUTPUT%`, `%MU_TARGET%`, `%MU_VERSION%`, `%MU_EXE%`
+and `%MU_TARGET_NAME%` (`$env:MU_SOURCE` in PowerShell) plus your own environment variables.
+**Build and install now** builds even when the source has not changed.
+
+### Theme
+
+**General → Application → Theme**: follow the Windows setting, or always light or dark.
+
+### Multron server options (developers)
+
+The Multron server options (maintenance mode, signature reload, seamless update) are hidden unless
+**General → Multron developers → Show Multron server options** is on. The server dashboard address and the
+scan wait time set there are used by every target that keeps **Use the global server settings**.
+
 ## How it works
 
 1. Asks GitHub for the latest commit of the branch. This request uses an ETag, so when nothing
@@ -155,6 +196,8 @@ Targets are checked one after another.
 | Log file | `%AppData%\MultronUpdater\log.txt` |
 | Backups | `%AppData%\MultronUpdater\backups\<target id>\` |
 | Console output (hidden console apps) | `%AppData%\MultronUpdater\console-logs\` |
+| Source folders (build from source) | `%AppData%\MultronUpdater\sources\<target id>\` |
+| Build logs | `%AppData%\MultronUpdater\build-logs\` |
 
 ## GitHub rate limit
 

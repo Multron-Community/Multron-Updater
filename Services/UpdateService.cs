@@ -14,7 +14,7 @@ namespace MultronUpdater.Services
 {
     public enum UpdateResult { UpToDate, Updated, Busy, Failed }
 
-    public enum UpdateStage { Checking, Downloading, Closing, Installing, Starting, Completed, Failed }
+    public enum UpdateStage { Checking, Downloading, Closing, Installing, Starting, Completed, Failed, Building }
 
     public sealed record UpdateProgress(
         string ProfileId,
@@ -68,9 +68,16 @@ namespace MultronUpdater.Services
 
         public bool IsBusy => _gate.CurrentCount == 0;
 
-        public async Task<UpdateResult> CheckAndUpdateAsync(UpdateProfile p, bool force, CancellationToken ct = default)
+        private readonly ConcurrentDictionary<string, bool> _rebuildRequested = new();
+        private readonly ConcurrentDictionary<string, string> _failedBuilds = new();
+        private bool _manualRun;
+
+        public void RequestRebuild(string profileId) => _rebuildRequested[profileId] = true;
+
+        public async Task<UpdateResult> CheckAndUpdateAsync(UpdateProfile p, bool force, CancellationToken ct = default, bool manual = false)
         {
             if (!await _gate.WaitAsync(0, ct)) return UpdateResult.Busy;
+            _manualRun = manual;
             var name = p.DisplayName;
             try
             {
@@ -132,11 +139,14 @@ namespace MultronUpdater.Services
             var shortSha = sha[..Math.Min(7, sha.Length)];
             var key = sha + "|" + p.SourceKey + "|" + p.SelectionKey;
             var verifiedKey = p.Id + ":repo";
+            var buildKey = BuildKey(p, sha);
 
             if (!force && _verified.TryGetValue(verifiedKey, out var known) && known.Key == key)
             {
-                if (StampsStillMatch(known.Files)) return new PartResult(false, $"Repository up to date (commit {shortSha})", 0, known.Files.Select(f => f.Path).ToList());
-                Logger.Info($"[{name}] Local files were changed or deleted since the last check; comparing them with GitHub again.");
+                if (StampsStillMatch(known.Files) && !NeedsBuild(p, buildKey, force))
+                    return new PartResult(false, $"Repository up to date (commit {shortSha})", 0, known.Files.Select(f => f.Path).ToList());
+                if (!StampsStillMatch(known.Files))
+                    Logger.Info($"[{name}] Local files were changed or deleted since the last check; comparing them with GitHub again.");
             }
 
             var files = await _github.GetFilesAsync(p, sha, ct);
@@ -153,7 +163,7 @@ namespace MultronUpdater.Services
                     throw new InvalidOperationException($"None of the checked files exist under '{p.RepoPath}' on GitHub.");
             }
 
-            var localRoot = Path.GetFullPath(p.LocalFolder);
+            var localRoot = p.BuildEnabled ? p.EffectiveBuildSourceFolder : Path.GetFullPath(p.LocalFolder);
             var rootWithSlash = localRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             var changed = new List<(RemoteFile Remote, string LocalPath)>();
             var localPaths = new List<string>();
@@ -170,8 +180,14 @@ namespace MultronUpdater.Services
             if (changed.Count == 0)
             {
                 _verified[verifiedKey] = new VerifiedState(key, TakeStamps(localPaths));
+                if (NeedsBuild(p, buildKey, force))
+                {
+                    var built = await BuildAndInstallAsync(p, new List<StagedFile>(), null, buildKey, shortSha,
+                        new AfterActions(true, p.RestartAfterUpdate, p.RefreshEdgeAfterUpdate), ct);
+                    return new PartResult(built > 0, built > 0 ? $"Built commit {shortSha} and installed {built} file(s)" : $"Built commit {shortSha}; the program is unchanged", built);
+                }
                 Logger.Info($"[{name}] Repository files are up to date (commit {shortSha}).");
-                return new PartResult(false, $"Repository up to date (commit {shortSha})", 0, localPaths);
+                return new PartResult(false, $"Repository up to date (commit {shortSha})", 0, p.BuildEnabled ? null : localPaths);
             }
 
             Logger.Info($"[{name}] New version in the repository (commit {shortSha}): {changed.Count} file(s) changed.");
@@ -231,6 +247,15 @@ namespace MultronUpdater.Services
             else
             {
                 actions = new AfterActions(true, p.RestartAfterUpdate, p.RefreshEdgeAfterUpdate);
+            }
+
+            if (p.BuildEnabled)
+            {
+                var built = await BuildAndInstallAsync(p, staged, staging, buildKey, shortSha, actions, ct);
+                _verified[verifiedKey] = new VerifiedState(key, TakeStamps(localPaths));
+                return new PartResult(built > 0, built > 0
+                    ? $"Built commit {shortSha} ({changed.Count} source file(s) changed) and installed {built} file(s)"
+                    : $"Built commit {shortSha}; the program is unchanged", built);
             }
 
             await InstallStagedAsync(p, staged, actions, staging, ct);
@@ -312,10 +337,13 @@ namespace MultronUpdater.Services
                                              .Select(f => $"{f.RelativePath}:{f.Size}:{f.WriteTimeUtc.Ticks}"))
                       + "|" + p.SourceKey + "|" + p.SelectionKey;
             var verifiedKey = p.Id + ":local";
-            if (!force && _verified.TryGetValue(verifiedKey, out var known) && known.Key == key && StampsStillMatch(known.Files))
+            var buildKey = BuildKey(p, key);
+            var sourceVersion = "local " + DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+            if (!force && _verified.TryGetValue(verifiedKey, out var known) && known.Key == key && StampsStillMatch(known.Files) &&
+                !NeedsBuild(p, buildKey, force))
                 return new PartResult(false, "Up to date with the local repository folder", 0, known.Files.Select(f => f.Path).ToList());
 
-            var localRoot = Path.GetFullPath(p.LocalFolder);
+            var localRoot = p.BuildEnabled ? p.EffectiveBuildSourceFolder : Path.GetFullPath(p.LocalFolder);
             var rootWithSlash = localRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             var changed = new List<(LocalSourceFile Source, string LocalPath, string Sha256)>();
             var localPaths = new List<string>();
@@ -336,6 +364,12 @@ namespace MultronUpdater.Services
             if (changed.Count == 0)
             {
                 _verified[verifiedKey] = new VerifiedState(key, TakeStamps(localPaths));
+                if (NeedsBuild(p, buildKey, force))
+                {
+                    var built = await BuildAndInstallAsync(p, new List<StagedFile>(), null, buildKey, sourceVersion,
+                        new AfterActions(true, p.RestartAfterUpdate, p.RefreshEdgeAfterUpdate), ct);
+                    return new PartResult(built > 0, built > 0 ? $"Built the local source and installed {built} file(s)" : "Built the local source; the program is unchanged", built);
+                }
                 Logger.Info($"[{name}] Up to date with the local repository folder ({files.Count} file(s)).");
                 return new PartResult(false, "Up to date with the local repository folder", 0, localPaths);
             }
@@ -383,6 +417,15 @@ namespace MultronUpdater.Services
             else
             {
                 actions = new AfterActions(true, p.RestartAfterUpdate, p.RefreshEdgeAfterUpdate);
+            }
+
+            if (p.BuildEnabled)
+            {
+                var built = await BuildAndInstallAsync(p, staged, staging, buildKey, sourceVersion, actions, ct);
+                _verified[verifiedKey] = new VerifiedState(key, TakeStamps(localPaths));
+                return new PartResult(built > 0, built > 0
+                    ? $"Built the local source ({changed.Count} file(s) changed) and installed {built} file(s)"
+                    : "Built the local source; the program is unchanged", built);
             }
 
             await InstallStagedAsync(p, staged, actions, staging, ct);
@@ -502,10 +545,17 @@ namespace MultronUpdater.Services
                 }
                 else
                 {
-                    var targetName = assets.Count == 1 && !string.IsNullOrWhiteSpace(p.ExeName) &&
-                                     string.Equals(Path.GetExtension(p.ExeName), Path.GetExtension(asset.Name), StringComparison.OrdinalIgnoreCase)
-                        ? p.ExeName.Trim().Replace('\\', '/')
-                        : asset.Name;
+                    var exeName = p.ExeName.Trim().Replace('\\', '/');
+                    string targetName;
+                    if (ProgramRunner.HasWildcard(exeName))
+                        targetName = ProgramRunner.MatchesExeName(p, asset.Name) && exeName.Contains('/')
+                            ? exeName[..(exeName.LastIndexOf('/') + 1)] + asset.Name
+                            : asset.Name;
+                    else
+                        targetName = assets.Count == 1 && exeName.Length > 0 &&
+                                     string.Equals(Path.GetExtension(exeName), Path.GetExtension(asset.Name), StringComparison.OrdinalIgnoreCase)
+                            ? exeName
+                            : asset.Name;
                     var local = Path.GetFullPath(Path.Combine(localRoot, targetName.Replace('/', Path.DirectorySeparatorChar)));
                     staged.Add(new StagedFile(targetName, local, download));
                 }
@@ -532,6 +582,109 @@ namespace MultronUpdater.Services
             return changedFiles.Count > 0
                 ? new PartResult(true, $"Installed release {release.Tag} ({changedFiles.Count} file(s))", changedFiles.Count)
                 : new PartResult(false, $"Release {release.Tag} is installed", 0);
+        }
+
+        private static string BuildKey(UpdateProfile p, string sourceVersion)
+        {
+            if (!p.BuildEnabled) return "";
+            var settings = string.Join("\n", p.BuildShell, p.BuildCommands, p.BuildWorkingDir, p.BuildOutputPath, p.BuildEnvironment, p.LocalFolder);
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(settings)))[..16];
+            return sourceVersion + "|" + hash;
+        }
+
+        private bool NeedsBuild(UpdateProfile p, string buildKey, bool force)
+        {
+            if (!p.BuildEnabled) return false;
+            if (force || _rebuildRequested.ContainsKey(p.Id)) return true;
+            if (p.BuildLastSuccessKey == buildKey) return false;
+            if (!_manualRun && _failedBuilds.TryGetValue(p.Id, out var failed) && failed == buildKey)
+            {
+                Logger.Info($"[{p.DisplayName}] The last build of this version failed; it is built again on a manual check (or after a new commit).");
+                return false;
+            }
+            return true;
+        }
+
+        private async Task<int> BuildAndInstallAsync(UpdateProfile p, List<StagedFile> sourceFiles, string? sourceStaging,
+                                                     string buildKey, string version, AfterActions actions, CancellationToken ct)
+        {
+            var name = p.DisplayName;
+            var source = p.EffectiveBuildSourceFolder;
+            Directory.CreateDirectory(source);
+            foreach (var f in sourceFiles)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(f.LocalPath)!);
+                await RetryAsync(() => File.Copy(f.StagingPath, f.LocalPath, true), ct);
+            }
+            if (sourceStaging != null) { try { Directory.Delete(sourceStaging, true); } catch { } }
+            if (sourceFiles.Count > 0) Logger.Info($"[{name}] {sourceFiles.Count} source file(s) updated in {source}.");
+
+            var output = Path.GetFullPath(Path.Combine(source, p.BuildOutputPath.Trim()));
+            var sourceWithSlash = source.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!output.StartsWith(sourceWithSlash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"The build output folder '{p.BuildOutputPath}' must be inside the source folder.");
+            if (p.BuildCleanOutput && Directory.Exists(output))
+            {
+                try { Directory.Delete(output, true); }
+                catch (Exception ex) { Logger.Warn($"[{name}] Could not clean the build output folder: {ex.Message}"); }
+            }
+
+            _rebuildRequested.TryRemove(p.Id, out _);
+            Report(p, UpdateStage.Building, "Building...");
+            Logger.Info($"[{name}] Building {version} ({p.BuildShell}) in {source}...");
+            var lastReport = DateTime.MinValue;
+            var result = await BuildRunner.RunAsync(p, source, version, line =>
+            {
+                if ((DateTime.Now - lastReport).TotalMilliseconds < 150) return;
+                lastReport = DateTime.Now;
+                Report(p, UpdateStage.Building, line.Length > 140 ? line[..140] + "…" : line);
+            }, ct);
+
+            if (!result.Success)
+            {
+                _failedBuilds[p.Id] = buildKey;
+                foreach (var line in result.Tail.Where(l => l.Trim().Length > 0).TakeLast(15))
+                    Logger.Warn($"[{name}] build: {line}");
+                throw new InvalidOperationException(result.TimedOut
+                    ? $"The build did not finish within {p.BuildTimeoutMinutes} minute(s) and was stopped. The installed program was not changed. Build log: {BuildRunner.LogFile(p)}"
+                    : $"The build failed (exit code {result.ExitCode}). The installed program was not changed. Build log: {BuildRunner.LogFile(p)}");
+            }
+            _failedBuilds.TryRemove(p.Id, out _);
+            Logger.Success($"[{name}] Build finished in {result.Duration:mm\\:ss}.");
+
+            if (!Directory.Exists(output) || !Directory.EnumerateFiles(output, "*", SearchOption.AllDirectories).Any())
+                throw new InvalidOperationException($"The build succeeded but the output folder '{output}' is empty or missing (check \"Build output folder\").");
+
+            var target = Path.GetFullPath(p.LocalFolder);
+            var staging = Path.Combine(AppSettings.DataFolder, "downloads", p.Id, "build-" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            var staged = new List<StagedFile>();
+            await Task.Run(() =>
+            {
+                foreach (var file in Directory.EnumerateFiles(output, "*", SearchOption.AllDirectories))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var rel = Path.GetRelativePath(output, file).Replace('\\', '/');
+                    var local = Path.Combine(target, rel.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(local) && new FileInfo(local).Length == new FileInfo(file).Length && ComputeSha256(local) == ComputeSha256(file))
+                        continue;
+                    var dest = Path.Combine(staging, rel.Replace('/', Path.DirectorySeparatorChar));
+                    Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                    File.Copy(file, dest, true);
+                    staged.Add(new StagedFile(rel, local, dest));
+                }
+            }, ct);
+
+            if (staged.Count == 0)
+            {
+                p.BuildLastSuccessKey = buildKey;
+                Logger.Info($"[{name}] The build output is the same as the installed program; nothing to install.");
+                try { Directory.Delete(staging, true); } catch { }
+                return 0;
+            }
+            Logger.Info($"[{name}] Installing {staged.Count} built file(s) into {target}.");
+            await InstallStagedAsync(p, staged, actions, staging, ct);
+            p.BuildLastSuccessKey = buildKey;
+            return staged.Count;
         }
 
         /// <summary>Files the running program keeps loaded: updating one needs a restart.</summary>
@@ -578,7 +731,7 @@ namespace MultronUpdater.Services
                     maintenance = await ServerMaintenance.EnterUpdatingAsync(p, ct);
                 }
                 Report(p, UpdateStage.Closing, $"Closing {Path.GetFileName(exePath)}...");
-                try { wasRunning = await ProgramRunner.CloseAsync(p, exePath); }
+                try { wasRunning = await ProgramRunner.CloseAllAsync(p, exePath); }
                 catch
                 {
                     // Still running: do not leave it refusing scans.
@@ -631,6 +784,30 @@ namespace MultronUpdater.Services
                 throw;
             }
             try { Directory.Delete(staging, true); } catch { }
+
+            if (ProgramRunner.HasWildcard(p.ExeName))
+            {
+                var installed = files.Select(f => f.LocalPath).Where(f => ProgramRunner.MatchesExeName(p, f)).ToList();
+                if (installed.Count > 0)
+                {
+                    foreach (var old in ProgramRunner.MatchingExePaths(p)
+                                 .Where(f => !installed.Contains(f, StringComparer.OrdinalIgnoreCase)))
+                    {
+                        try
+                        {
+                            Directory.CreateDirectory(backup);
+                            await RetryAsync(() => File.Copy(old, Path.Combine(backup, Path.GetFileName(old)), true), ct);
+                            await RetryAsync(() => File.Delete(old), ct);
+                            Logger.Info($"[{name}] Removed the previous version {Path.GetFileName(old)}.");
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            Logger.Warn($"[{name}] Could not remove the previous version {Path.GetFileName(old)}: {ex.Message}");
+                        }
+                    }
+                    exePath = installed[0];
+                }
+            }
 
             if (!p.KeepBackup) { try { if (Directory.Exists(backup)) Directory.Delete(backup, true); } catch { } }
             else if (Directory.Exists(backup))
@@ -733,7 +910,7 @@ namespace MultronUpdater.Services
             try { Directory.Delete(staging, true); } catch { }
 
             Report(p, UpdateStage.Starting, "Starting the new version next to the running server (seamless update)...");
-            var drain = Math.Clamp(p.ServerDrainSeconds, 0, 300);
+            var drain = Math.Clamp(p.EffectiveServerDrainSeconds, 0, 300);
             ProgramRunner.Start(p, exePath, $"--handoff --handoff-drain-secs {drain}");
             Logger.Info($"[{name}] Seamless update: the running server (pid {oldPid}) keeps scanning while the new version loads.");
 
@@ -889,6 +1066,22 @@ namespace MultronUpdater.Services
             if (version.Length < 3) return false;
             var cleanTag = tag.TrimStart('v', 'V');
             return cleanTag == version || cleanTag.StartsWith(version + "-") || cleanTag.StartsWith(version + "+");
+        }
+
+        private static readonly Regex VersionInName = new(
+            @"(?<![\dA-Za-z])v?\d+(?:\.\d+)+(?:[-+](?:\d+(?:\.\d+)*|(?:alpha|beta|rc|pre|preview|dev)\.?\d*))*",
+            RegexOptions.IgnoreCase);
+
+        public static string VersionToWildcard(string fileName, string? releaseTag = null)
+        {
+            var tag = releaseTag?.Trim();
+            foreach (var candidate in new[] { tag, tag?.TrimStart('v', 'V') })
+            {
+                if (string.IsNullOrEmpty(candidate) || candidate.Length < 2) continue;
+                var i = fileName.IndexOf(candidate, StringComparison.OrdinalIgnoreCase);
+                if (i >= 0) return fileName[..i] + "*" + fileName[(i + candidate.Length)..];
+            }
+            return VersionInName.Replace(fileName, "*", 1);
         }
 
         public static bool MatchesPattern(string name, string patterns)

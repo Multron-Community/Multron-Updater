@@ -66,6 +66,7 @@ namespace MultronUpdater.Views
                 {
                     UpdateStage.Closing => $"{p.ProfileName}: closing program",
                     UpdateStage.Installing => $"{p.ProfileName}: installing",
+                    UpdateStage.Building => $"{p.ProfileName}: building",
                     UpdateStage.Starting => $"{p.ProfileName}: finishing",
                     _ => $"Updating {p.ProfileName}"
                 };

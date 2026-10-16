@@ -76,6 +76,7 @@ namespace MultronUpdater
             TaskScheduler.UnobservedTaskException += (_, ex) => { Logger.Error("Background error: " + ex.Exception.GetBaseException().Message); ex.SetObserved(); };
 
             Settings = AppSettings.Load();
+            ThemeManager.Apply(Settings.Theme);
             Logger.Info($"Multron Updater {SelfUpdater.CurrentVersion} started ({Settings.Profiles.Count} target(s)).");
             SelfUpdater.CleanupOldVersion();
 
@@ -285,7 +286,7 @@ namespace MultronUpdater
                 foreach (var target in targets)
                 {
                     var snapshot = target.Clone();
-                    var result = await Task.Run(() => Updater.CheckAndUpdateAsync(snapshot, force));
+                    var result = await Task.Run(() => Updater.CheckAndUpdateAsync(snapshot, force, default, manual));
 
                     var live = Settings.Profiles.FirstOrDefault(p => p.Id == target.Id);
                     if (live != null)
@@ -295,6 +296,7 @@ namespace MultronUpdater
                         live.InstalledReleaseTag = snapshot.InstalledReleaseTag;
                         live.InstalledReleaseDigest = snapshot.InstalledReleaseDigest;
                         live.InstalledReleaseFiles = snapshot.InstalledReleaseFiles;
+                        live.BuildLastSuccessKey = snapshot.BuildLastSuccessKey;
                     }
                     if (result == UpdateResult.Updated) updatedNames.Add(target.DisplayName);
                     if (result == UpdateResult.Failed) overall = UpdateResult.Failed;
@@ -332,6 +334,7 @@ namespace MultronUpdater
                 case UpdateStage.Downloading:
                 case UpdateStage.Closing:
                 case UpdateStage.Installing:
+                case UpdateStage.Building:
                 case UpdateStage.Starting:
                     _tray?.StartAnimation();
                     _tray?.SetTooltip(p.Stage == UpdateStage.Downloading && p.BytesTotal > 0

@@ -260,7 +260,9 @@ namespace MultronUpdater.Services
                 var sha = item.GetProperty("sha").GetString()!;
                 var size = item.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0;
 
-                if (string.Equals(path, target, StringComparison.Ordinal))
+                if (target.Length == 0)
+                    result.Add(new RemoteFile(path, path, sha, size));
+                else if (string.Equals(path, target, StringComparison.Ordinal))
                     result.Add(new RemoteFile(path, Path.GetFileName(path), sha, size));
                 else if (path.StartsWith(target + "/", StringComparison.Ordinal))
                     result.Add(new RemoteFile(path, path[(target.Length + 1)..], sha, size));

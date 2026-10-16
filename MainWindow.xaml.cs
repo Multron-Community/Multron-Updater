@@ -50,7 +50,7 @@ namespace MultronUpdater
             Loaded += (_, _) => ScrollLogToEnd();
 
             GroupsList.ItemsSource = _groups;
-            SourceInitialized += (_, _) => FileDropHelper.Enable(this, OnExplorerDrop);
+            SourceInitialized += (_, _) => { FileDropHelper.Enable(this, OnExplorerDrop); ThemeManager.ApplyTitleBar(this); };
             PreviewMouseMove += Window_PreviewMouseMove;
             PreviewMouseLeftButtonUp += Window_PreviewMouseLeftButtonUp;
 
@@ -68,7 +68,8 @@ namespace MultronUpdater
 
         private void HookAutoSave()
         {
-            foreach (var box in new[] { NameBox, OwnerBox, RepoBox, BranchBox, RepoPathBox, FolderBox, ExeBox, IntervalBox, ServerUrlBox, DrainBox, LocalRepoBox })
+            foreach (var box in new[] { NameBox, OwnerBox, RepoBox, BranchBox, RepoPathBox, FolderBox, ExeBox, IntervalBox, ServerUrlBox, DrainBox, LocalRepoBox,
+                                        GlobalServerUrlBox, GlobalDrainBox })
                 box.TextChanged += (_, _) => ScheduleAutoSave();
             TokenBox.PasswordChanged += (_, _) => ScheduleAutoSave();
             foreach (var check in new[] { EnabledCheck, RestartCheck, EdgeCheck, BackupCheck, OnlyFilesCheck, NotifyCheck, MinimizedCheck, StartupCheck, SelfUpdateCheck })
@@ -77,9 +78,43 @@ namespace MultronUpdater
                                           SourceBothRadio, SourceRepoRadio, SourceReleasesRadio, SourceLocalRadio })
                 radio.Click += (_, _) => ScheduleAutoSave();
             ExtractZipCheck.Click += (_, _) => ScheduleAutoSave();
+            foreach (var box in new[] { BuildSourceBox, BuildCommandsBox, BuildOutputBox, BuildWorkDirBox, BuildEnvBox, BuildTimeoutBox })
+                box.TextChanged += (_, _) => ScheduleAutoSave();
+            BuildSourceBox.TextChanged += (_, _) => UpdateBuildUi();
+            foreach (var check in new[] { BuildEnabledCheck, BuildStopOnErrorCheck, BuildCleanCheck })
+                check.Click += (_, _) => { ScheduleAutoSave(); UpdateBuildUi(); };
+            BuildShellBox.SelectionChanged += (_, _) => ScheduleAutoSave();
+            BuildTemplateBox.Items.Add("Insert a template...");
+            foreach (var t in BuildRunner.Templates) BuildTemplateBox.Items.Add(t.Name);
+            BuildTemplateBox.SelectedIndex = 0;
+            BuildTemplateBox.SelectionChanged += (_, _) =>
+            {
+                if (_loading || BuildTemplateBox.SelectedIndex <= 0) return;
+                ApplyBuildTemplate(BuildTemplateBox.SelectedIndex - 1);
+                BuildTemplateBox.SelectedIndex = 0;
+            };
+            ThemeBox.SelectionChanged += (_, _) =>
+            {
+                if (_loading) return;
+                ThemeManager.Apply((AppTheme)Math.Max(0, ThemeBox.SelectedIndex));
+                ScheduleAutoSave();
+            };
             ServerMaintCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
             ServerReloadCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
             ServerSeamlessCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
+            ServerUseGlobalCheck.Click += (_, _) =>
+            {
+                if (ServerUseGlobalCheck.IsChecked != true && _current != null)
+                {
+                    ServerUrlBox.Text = _current.ServerDashboardUrl;
+                    DrainBox.Text = _current.ServerDrainSeconds.ToString();
+                }
+                ScheduleAutoSave();
+                UpdateServerMaintUi();
+            };
+            GlobalServerUrlBox.TextChanged += (_, _) => UpdateServerMaintUi();
+            GlobalDrainBox.TextChanged += (_, _) => UpdateServerMaintUi();
+            DevOptionsCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
             NoAdminCheck.Click += (_, _) => ScheduleAutoSave();
             ArgsBox.TextChanged += (_, _) => ScheduleAutoSave();
             AssetBox.TextChanged += (_, _) => { ScheduleAutoSave(); UpdateSourceUi(); };
@@ -92,9 +127,20 @@ namespace MultronUpdater
             _savedFade.Tick += (_, _) => { _savedFade.Stop(); SavedText.Text = ""; };
         }
 
-        private void UpdateServerMaintUi() =>
-            ServerMaintPanel.Visibility = ServerMaintCheck.IsChecked == true || ServerReloadCheck.IsChecked == true || ServerSeamlessCheck.IsChecked == true
-                ? Visibility.Visible : Visibility.Collapsed;
+        private void UpdateServerMaintUi()
+        {
+            bool anyServerOption = ServerMaintCheck.IsChecked == true || ServerReloadCheck.IsChecked == true || ServerSeamlessCheck.IsChecked == true;
+            bool dev = DevOptionsCheck.IsChecked == true;
+            DevGlobalPanel.Visibility = dev ? Visibility.Visible : Visibility.Collapsed;
+            DevServerPanel.Visibility = dev || anyServerOption ? Visibility.Visible : Visibility.Collapsed;
+            ServerMaintPanel.Visibility = anyServerOption ? Visibility.Visible : Visibility.Collapsed;
+            ServerOwnGrid.IsEnabled = ServerUseGlobalCheck.IsChecked != true;
+            if (ServerUseGlobalCheck.IsChecked == true)
+            {
+                ServerUrlBox.Text = GlobalServerUrlBox.Text;
+                DrainBox.Text = GlobalDrainBox.Text;
+            }
+        }
 
         private void ScheduleAutoSave()
         {
@@ -121,6 +167,10 @@ namespace MultronUpdater
                 NotifyCheck.IsChecked = s.NotifyOnUpdate;
                 MinimizedCheck.IsChecked = s.StartMinimized;
                 SelfUpdateCheck.IsChecked = s.SelfUpdateEnabled;
+                DevOptionsCheck.IsChecked = s.MultronDeveloperOptions;
+                ThemeBox.SelectedIndex = (int)s.Theme;
+                GlobalServerUrlBox.Text = s.ServerDashboardUrl;
+                GlobalDrainBox.Text = s.ServerDrainSeconds.ToString();
                 try { StartupCheck.IsChecked = StartupHelper.IsEnabled(); }
                 catch { StartupCheck.IsChecked = s.StartWithWindows; }
             }
@@ -160,6 +210,7 @@ namespace MultronUpdater
                 ExtractZipCheck.IsChecked = p.ExtractZipAssets;
                 NoAdminCheck.IsChecked = p.StartWithoutAdmin;
                 ReleaseInfoText.Text = p.InstalledReleaseFiles.Count > 0 ? $"Installed release: {p.InstalledReleaseTag}" : "";
+                ReleaseAssetList.ItemsSource = null;
                 UpdateSourceUi();
                 RestartCheck.IsChecked = p.RestartAfterUpdate;
                 EdgeCheck.IsChecked = p.RefreshEdgeAfterUpdate;
@@ -167,6 +218,18 @@ namespace MultronUpdater
                 ServerMaintCheck.IsChecked = p.ServerMaintenance;
                 ServerReloadCheck.IsChecked = p.ServerReloadSignatures;
                 ServerSeamlessCheck.IsChecked = p.ServerSeamlessUpdate;
+                ServerUseGlobalCheck.IsChecked = p.ServerUseGlobal != false;
+                BuildEnabledCheck.IsChecked = p.BuildEnabled;
+                BuildSourceBox.Text = p.BuildSourceFolder;
+                BuildShellBox.SelectedIndex = (int)p.BuildShell;
+                BuildCommandsBox.Text = p.BuildCommands;
+                BuildOutputBox.Text = p.BuildOutputPath;
+                BuildWorkDirBox.Text = p.BuildWorkingDir;
+                BuildEnvBox.Text = p.BuildEnvironment;
+                BuildTimeoutBox.Text = p.BuildTimeoutMinutes.ToString();
+                BuildStopOnErrorCheck.IsChecked = p.BuildStopOnError;
+                BuildCleanCheck.IsChecked = p.BuildCleanOutput;
+                UpdateBuildUi();
                 ServerUrlBox.Text = p.ServerDashboardUrl;
                 DrainBox.Text = p.ServerDrainSeconds.ToString();
                 UpdateServerMaintUi();
@@ -212,8 +275,22 @@ namespace MultronUpdater
             p.ServerMaintenance = ServerMaintCheck.IsChecked == true;
             p.ServerReloadSignatures = ServerReloadCheck.IsChecked == true;
             p.ServerSeamlessUpdate = ServerSeamlessCheck.IsChecked == true;
-            p.ServerDashboardUrl = string.IsNullOrWhiteSpace(ServerUrlBox.Text) ? "http://127.0.0.1:9440" : ServerUrlBox.Text.Trim();
-            if (int.TryParse(DrainBox.Text.Trim(), out var drain)) p.ServerDrainSeconds = Math.Clamp(drain, 0, 600);
+            p.BuildEnabled = BuildEnabledCheck.IsChecked == true;
+            p.BuildSourceFolder = BuildSourceBox.Text.Trim();
+            p.BuildShell = (BuildShell)Math.Max(0, BuildShellBox.SelectedIndex);
+            p.BuildCommands = BuildCommandsBox.Text.TrimEnd();
+            p.BuildOutputPath = BuildOutputBox.Text.Trim();
+            p.BuildWorkingDir = BuildWorkDirBox.Text.Trim();
+            p.BuildEnvironment = BuildEnvBox.Text.TrimEnd();
+            if (int.TryParse(BuildTimeoutBox.Text.Trim(), out var buildMinutes)) p.BuildTimeoutMinutes = Math.Clamp(buildMinutes, 1, 1440);
+            p.BuildStopOnError = BuildStopOnErrorCheck.IsChecked == true;
+            p.BuildCleanOutput = BuildCleanCheck.IsChecked == true;
+            p.ServerUseGlobal = ServerUseGlobalCheck.IsChecked == true;
+            if (p.ServerUseGlobal == false)
+            {
+                p.ServerDashboardUrl = string.IsNullOrWhiteSpace(ServerUrlBox.Text) ? AppSettings.DefaultServerUrl : ServerUrlBox.Text.Trim();
+                if (int.TryParse(DrainBox.Text.Trim(), out var drain)) p.ServerDrainSeconds = Math.Clamp(drain, 0, 600);
+            }
             p.OnlySelectedFiles = OnlyFilesCheck.IsChecked == true;
             p.Groups = _groups.Select(g => g.ToModel()).ToList();
             p.NotifyDisplayChanged();
@@ -239,6 +316,10 @@ namespace MultronUpdater
             s.StartMinimized = MinimizedCheck.IsChecked == true;
             s.SelfUpdateEnabled = SelfUpdateCheck.IsChecked == true;
             s.StartWithWindows = StartupCheck.IsChecked == true;
+            s.MultronDeveloperOptions = DevOptionsCheck.IsChecked == true;
+            s.Theme = (AppTheme)Math.Max(0, ThemeBox.SelectedIndex);
+            s.ServerDashboardUrl = string.IsNullOrWhiteSpace(GlobalServerUrlBox.Text) ? AppSettings.DefaultServerUrl : GlobalServerUrlBox.Text.Trim();
+            if (int.TryParse(GlobalDrainBox.Text.Trim(), out var drain)) s.ServerDrainSeconds = Math.Clamp(drain, 0, 600);
             return true;
         }
 
@@ -255,7 +336,7 @@ namespace MultronUpdater
             if (_current != null) ReadProfile(_current);
 
             if (!silent && _current != null && !string.IsNullOrEmpty(_current.ExeName) && !string.IsNullOrEmpty(_current.LocalFolder) &&
-                !File.Exists(Path.Combine(_current.LocalFolder, _current.ExeName)))
+                !(ProgramRunner.ExePath(_current) is string exe && File.Exists(exe)))
                 Logger.Warn($"[{_current.DisplayName}] {_current.ExeName} does not exist in the target folder yet; it will be downloaded on the first update.");
 
             try { s.Save(); }
@@ -473,28 +554,80 @@ namespace MultronUpdater
             };
             if (Directory.Exists(FolderBox.Text)) dlg.InitialDirectory = FolderBox.Text;
             if (dlg.ShowDialog(this) != true) return;
-
-            var folder = FolderBox.Text.Trim();
-            var file = dlg.FileName;
-            bool insideFolder = folder.Length > 0 && Directory.Exists(folder) &&
-                                Path.GetFullPath(file).StartsWith(Path.GetFullPath(folder).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
-            if (insideFolder)
-                ExeBox.Text = Path.GetRelativePath(folder, file);
-            else
-            {
-                FolderBox.Text = Path.GetDirectoryName(file)!;
-                ExeBox.Text = Path.GetFileName(file);
-            }
-
-            if (ProgramRunner.IsConsoleExe(file) is bool console)
-            {
-                WindowsAppRadio.IsChecked = !console;
-                ConsoleAppRadio.IsChecked = console;
-                ScheduleAutoSave();
-            }
+            UseProgramFile(dlg.FileName);
         }
 
         private void Source_Changed(object sender, RoutedEventArgs e) => UpdateSourceUi();
+
+        private string EffectiveBuildSource() => _current == null ? "" :
+            (string.IsNullOrWhiteSpace(BuildSourceBox.Text)
+                ? Path.Combine(AppSettings.DataFolder, "sources", _current.Id)
+                : Environment.ExpandEnvironmentVariables(BuildSourceBox.Text.Trim()));
+
+        private void UpdateBuildUi()
+        {
+            BuildPanel.Visibility = BuildEnabledCheck.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+            BuildSourceHint.Text = string.IsNullOrWhiteSpace(BuildSourceBox.Text)
+                ? $"Empty: {EffectiveBuildSource()}"
+                : "Use a folder of its own: files that are not in the repository stay, files from the repository are overwritten.";
+        }
+
+        private void ApplyBuildTemplate(int index)
+        {
+            var t = BuildRunner.Templates[index];
+            if (BuildCommandsBox.Text.Trim().Length > 0 &&
+                MessageBox.Show(this, $"Replace the build commands with the \"{t.Name}\" template?", "Build template",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+            BuildShellBox.SelectedIndex = (int)t.Shell;
+            BuildCommandsBox.Text = t.Commands;
+            BuildOutputBox.Text = t.Output;
+            ScheduleAutoSave();
+            SetStatus($"Template \"{t.Name}\" inserted", "Check the commands and the output folder for this project.");
+        }
+
+        private void DetectBuild_Click(object sender, RoutedEventArgs e)
+        {
+            var source = EffectiveBuildSource();
+            if (!Directory.Exists(source) || !Directory.EnumerateFileSystemEntries(source).Any())
+            {
+                ShowWarning("The source folder is empty. Run \"Build and install now\" or \"Check this target\" once to download the source, or pick a template.");
+                return;
+            }
+            if (BuildRunner.DetectTemplate(source) is int i) ApplyBuildTemplate(i);
+            else ShowWarning("No known project type was found in the source folder. Pick a template or write the commands yourself.");
+        }
+
+        private void BrowseBuildSource_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new OpenFolderDialog { Title = "Select the folder where the source is kept and built" };
+            if (Directory.Exists(EffectiveBuildSource())) dlg.InitialDirectory = EffectiveBuildSource();
+            if (dlg.ShowDialog(this) == true) BuildSourceBox.Text = dlg.FolderName;
+        }
+
+        private void OpenBuildSource_Click(object sender, RoutedEventArgs e)
+        {
+            var source = EffectiveBuildSource();
+            if (Directory.Exists(source)) OpenPath(source);
+            else ShowWarning("The source folder does not exist yet; it is created on the first build.");
+        }
+
+        private void OpenBuildLog_Click(object sender, RoutedEventArgs e)
+        {
+            if (_current == null) return;
+            var file = BuildRunner.LogFile(_current);
+            if (File.Exists(file)) OpenPath(file);
+            else ShowWarning("There is no build log yet. It is written on the first build.");
+        }
+
+        private async void BuildNow_Click(object sender, RoutedEventArgs e)
+        {
+            _autoSave.Stop();
+            if (_current == null || !SaveForm(showConfirmation: false)) return;
+            if (!_current.IsConfigured(out var err)) { ShowWarning(err); return; }
+            AppInstance.Updater.RequestRebuild(_current.Id);
+            await AppInstance.RunCheckAsync(_current.Id, force: false, manual: true);
+        }
 
         private void BrowseLocalRepo_Click(object sender, RoutedEventArgs e)
         {
@@ -537,19 +670,115 @@ namespace MultronUpdater
                     return;
                 }
                 var pattern = profile.EffectiveAssetPattern();
-                var lines = release.Assets.Select(a =>
-                    $"{(pattern.Length > 0 && UpdateService.MatchesPattern(a.Name, pattern) ? "✓" : "  ")} {a.Name}  ({UpdateService.FormatSize(a.Size)}{(a.Sha256 != null ? ", SHA-256" : "")})");
+                ReleaseAssetList.ItemsSource = release.Assets
+                    .OrderByDescending(a => a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                    .Select(a => new ReleaseAssetItem(a.Name,
+                        $"  ({UpdateService.FormatSize(a.Size)}{(a.Sha256 != null ? ", SHA-256" : "")})",
+                        pattern.Length > 0 && UpdateService.MatchesPattern(a.Name, pattern) ? "✓" : "",
+                        release.Tag))
+                    .ToList();
                 ReleaseInfoText.Text = $"Latest release: {release.Tag}{(release.Name.Length > 0 && release.Name != release.Tag ? " – " + release.Name : "")}" +
                                        (profile.InstalledReleaseFiles.Count > 0 ? $"   ·   installed: {profile.InstalledReleaseTag}" : "") +
-                                       Environment.NewLine + (release.Assets.Count == 0 ? "This release has no files." : string.Join(Environment.NewLine, lines)) +
+                                       (release.Assets.Count == 0 ? Environment.NewLine + "This release has no files." : "") +
                                        (pattern.Length > 0 && !release.Assets.Any(a => UpdateService.MatchesPattern(a.Name, pattern))
-                                           ? Environment.NewLine + $"No file matches '{pattern}'." : "");
+                                           ? Environment.NewLine + $"No file matches '{pattern}'. Pick one below." : "");
             }
             catch (Exception ex)
             {
                 ReleaseInfoText.Text = "Could not load the release: " + ex.Message;
             }
             finally { CheckReleaseButton.IsEnabled = true; }
+        }
+
+        public sealed record ReleaseAssetItem(string Name, string Info, string Mark, string Tag);
+
+        private void UseReleaseAsset_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.Tag is not ReleaseAssetItem item) return;
+            var wildcard = UpdateService.VersionToWildcard(item.Name, item.Tag);
+            AssetBox.Text = wildcard;
+            if (item.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var exe = ExeBox.Text.Trim().Replace('\\', '/');
+                ExeBox.Text = (exe.Contains('/') ? exe[..(exe.LastIndexOf('/') + 1)] : "") + wildcard;
+            }
+            ScheduleAutoSave();
+            SetStatus($"Release file set to {wildcard}", null);
+        }
+
+        private async void PickRunning_Click(object sender, RoutedEventArgs e)
+        {
+            RunningButton.IsEnabled = false;
+            var folder = FolderBox.Text.Trim();
+            List<(string Path, string Title)> programs;
+            try { programs = await System.Threading.Tasks.Task.Run(() => RunningPrograms(folder)); }
+            finally { RunningButton.IsEnabled = true; }
+
+            var menu = new ContextMenu { PlacementTarget = RunningButton, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+            if (programs.Count == 0) menu.Items.Add(new MenuItem { Header = "No running programs found", IsEnabled = false });
+            foreach (var (path, title) in programs)
+            {
+                var item = new MenuItem
+                {
+                    Header = $"{Path.GetFileName(path)}{(title.Length > 0 ? "  –  " + title : "")}",
+                    ToolTip = path
+                };
+                item.Click += (_, _) => UseProgramFile(path);
+                menu.Items.Add(item);
+            }
+            menu.IsOpen = true;
+        }
+
+        private static List<(string Path, string Title)> RunningPrograms(string folder)
+        {
+            var self = Environment.ProcessId;
+            var root = folder.Length > 0 && Directory.Exists(folder) ? Path.GetFullPath(folder).TrimEnd('\\') + "\\" : null;
+            var result = new Dictionary<string, (string Path, string Title)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var proc in Process.GetProcesses())
+            {
+                using (proc)
+                {
+                    try
+                    {
+                        if (proc.Id == self || proc.SessionId == 0) continue;
+                        bool hasWindow = proc.MainWindowHandle != IntPtr.Zero;
+                        var path = proc.MainModule?.FileName;
+                        if (path == null) continue;
+                        bool inFolder = root != null && path.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+                        if (!hasWindow && !inFolder) continue;
+                        if (path.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows), StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!result.ContainsKey(path)) result[path] = (path, proc.MainWindowTitle ?? "");
+                    }
+                    catch { }
+                }
+            }
+            return result.Values
+                .OrderByDescending(p => root != null && p.Path.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(p => Path.GetFileName(p.Path), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private void UseProgramFile(string path)
+        {
+            var folder = FolderBox.Text.Trim();
+            bool insideFolder = folder.Length > 0 && Directory.Exists(folder) &&
+                                Path.GetFullPath(path).StartsWith(Path.GetFullPath(folder).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+            string relative;
+            if (insideFolder) relative = Path.GetRelativePath(folder, path);
+            else
+            {
+                FolderBox.Text = Path.GetDirectoryName(path)!;
+                relative = Path.GetFileName(path);
+            }
+            var dir = Path.GetDirectoryName(relative);
+            ExeBox.Text = (string.IsNullOrEmpty(dir) ? "" : dir + "\\") + UpdateService.VersionToWildcard(Path.GetFileName(relative));
+            if (ProgramRunner.IsConsoleExe(path) is bool console)
+            {
+                WindowsAppRadio.IsChecked = !console;
+                ConsoleAppRadio.IsChecked = console;
+            }
+            ScheduleAutoSave();
+            SetStatus($"Program to close: {ExeBox.Text}", null);
         }
 
         private void ProgramType_Changed(object sender, RoutedEventArgs e)
@@ -934,13 +1163,13 @@ namespace MultronUpdater
                     : TaskbarItemProgressState.Indeterminate;
             }
             if (p.Stage == UpdateStage.Failed)
-                StatusText.Foreground = new SolidColorBrush(Color.FromRgb(0xCF, 0x22, 0x2E));
+                StatusText.SetResourceReference(TextBlock.ForegroundProperty, "ErrorFgBrush");
         }
 
         private void SetStatus(string text, string? detail)
         {
             StatusText.Text = text;
-            StatusText.Foreground = (Brush)FindResource("TextBrush");
+            StatusText.SetResourceReference(TextBlock.ForegroundProperty, "TextBrush");
             StatusDetail.Text = detail ?? BuildDetail();
         }
 
