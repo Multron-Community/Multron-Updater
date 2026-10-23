@@ -819,6 +819,26 @@ namespace MultronUpdater
             SetStatus($"Started {Path.GetFileName(exe)}", null);
         }
 
+        private async void StopNow_Click(object sender, RoutedEventArgs e)
+        {
+            if (_current == null) return;
+            _autoSave.Stop();
+            if (!SaveForm(showConfirmation: false)) return;
+            var exe = ProgramRunner.ExePath(_current);
+            if (exe == null) { ShowWarning("Choose the target folder and the program (.exe) first."); return; }
+            if (AppInstance.Updater.IsBusy) { ShowWarning("An update is running. Close the program after it has finished."); return; }
+            var name = ProgramRunner.HasWildcard(_current.ExeName) ? _current.ExeName : Path.GetFileName(exe);
+            StopNowButton.IsEnabled = false;
+            try
+            {
+                SetStatus($"Closing {name}...", null);
+                bool closed = await ProgramRunner.CloseAllAsync(_current, exe);
+                SetStatus(closed ? $"Closed {name}" : $"{name} is not running", null);
+            }
+            catch (Exception ex) { ShowWarning(ex.Message); }
+            finally { StopNowButton.IsEnabled = true; }
+        }
+
         private void OpenConsoleLog_Click(object sender, RoutedEventArgs e)
         {
             if (_current == null) return;

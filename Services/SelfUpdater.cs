@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 
 namespace MultronUpdater.Services
 {
-    public sealed record ReleaseInfo(Version Version, string Tag, string DownloadUrl, long Size, string? Sha256, string Notes, string PageUrl);
+    public sealed record ReleaseInfo(Version Version, string Tag, string DownloadUrl, long Size, string? Sha256, string Notes, string PageUrl, string? ManifestUrl = null, string? SignatureUrl = null);
 
     public sealed class SelfUpdater : IDisposable
     {
@@ -91,6 +91,11 @@ namespace MultronUpdater.Services
                 if (digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)) sha = digest[7..].ToLowerInvariant();
             }
 
+            string? AssetUrl(string name) => root.GetProperty("assets").EnumerateArray()
+                .Where(a => a.GetProperty("name").GetString() == name)
+                .Select(a => a.GetProperty("browser_download_url").GetString())
+                .FirstOrDefault();
+
             _cached = new ReleaseInfo(
                 new Version(version.Major, version.Minor, Math.Max(0, version.Build)),
                 tag,
@@ -98,7 +103,9 @@ namespace MultronUpdater.Services
                 asset.GetProperty("size").GetInt64(),
                 sha,
                 root.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "",
-                root.TryGetProperty("html_url", out var h) ? h.GetString() ?? "" : "");
+                root.TryGetProperty("html_url", out var h) ? h.GetString() ?? "" : "",
+                AssetUrl(UpdateSignature.ManifestName),
+                AssetUrl(UpdateSignature.SignatureName));
             _etag = res.Headers.ETag?.ToString();
             return _cached;
         }
@@ -111,6 +118,16 @@ namespace MultronUpdater.Services
             var folder = Path.Combine(AppSettings.DataFolder, "self-update");
             Directory.CreateDirectory(folder);
             var download = Path.Combine(folder, $"MultronUpdater-{release.Version}.exe");
+
+            Report(UpdateStage.Downloading, "Checking the update signature...");
+            if (!UpdateSignature.IsTrustedUrl(release.DownloadUrl)
+                || !UpdateSignature.IsTrustedUrl(release.ManifestUrl)
+                || !UpdateSignature.IsTrustedUrl(release.SignatureUrl))
+                throw new InvalidOperationException("The update is not signed or does not come from the official GitHub releases, so it was not installed.");
+            var manifest = await _http.GetByteArrayAsync(release.ManifestUrl, ct);
+            var signature = await _http.GetStringAsync(release.SignatureUrl, ct);
+            var hashes = UpdateSignature.VerifyManifest(manifest, signature, UpdateKey.PublicKey, release.Version, CurrentVersion);
+            var expected = UpdateSignature.ExpectedHash(hashes, AssetName);
 
             Report(UpdateStage.Downloading, "Downloading update...", 0, release.Size);
             using (var res = await _http.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct))
@@ -151,6 +168,7 @@ namespace MultronUpdater.Services
                 if (actual != release.Sha256)
                     throw new InvalidOperationException("The downloaded file failed SHA-256 verification.");
             }
+            UpdateSignature.VerifyFile(download, expected);
 
             Report(UpdateStage.Installing, "Installing update...");
             var old = exe + ".old";

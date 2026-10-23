@@ -10,19 +10,24 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
+    name: Build
     runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: '8.0.x'
 
@@ -40,17 +45,63 @@ jobs:
       - name: Publish single-file exe
         run: dotnet publish MultronUpdater.csproj -c Release -o publish -p:Version=${{ steps.version.outputs.version }}
 
-      - name: Create release
+      - name: Collect the release files
         shell: pwsh
         env:
-          GH_TOKEN: ${{ github.token }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          $version = "${{ steps.version.outputs.version }}"
+          New-Item -ItemType Directory -Force release-files | Out-Null
+          Copy-Item publish/MultronUpdater.exe release-files/MultronUpdater.exe
           $notes = if ($env:COMMIT_MESSAGE) { $env:COMMIT_MESSAGE } else { "Manual build of ${{ github.sha }}" }
           Set-Content -Path notes.md -Value $notes -Encoding utf8
-          gh release create "v$version" publish/MultronUpdater.exe `
-            --title "Multron Updater $version" `
-            --notes-file notes.md `
-            --target "${{ github.sha }}" `
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-files
+          path: |
+            release-files/MultronUpdater.exe
+            notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Sign, attest & publish
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release-signing
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-files
+          path: built
+
+      - name: Sign the update
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          mkdir -p release
+          cp built/release-files/MultronUpdater.exe release/MultronUpdater.exe
+          node scripts/sign-release.mjs release "$VERSION"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: release/MultronUpdater.exe
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "v$VERSION" release/MultronUpdater.exe release/SHA256SUMS.txt release/update.json release/update.json.sig \
+            --title "Multron Updater $VERSION" \
+            --notes-file built/notes.md \
+            --target "$GITHUB_SHA" \
             --latest

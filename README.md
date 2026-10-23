@@ -36,7 +36,7 @@ Built with C# / WPF on .NET 8.
 - **Private repositories** – optional personal access token, stored encrypted (Windows DPAPI) for the current user.
 - **Start with Windows** – registered as a logon task, so it starts without a UAC prompt.
 - **Auto-saving settings** – every change is saved as you type.
-- **Updates itself** – every push to `main` builds a new release, and Multron Updater installs it and restarts.
+- **Updates itself, signed** – every push to `main` builds a new release, and Multron Updater installs it and restarts. Every release is signed: the update is only installed when its signed `update.json` and the SHA-256 of `MultronUpdater.exe` check out (see [Signed self-updates](#signed-self-updates)).
 
 ## Requirements
 
@@ -253,3 +253,19 @@ dotnet publish -c Release -o publish
 - Building uses the compilers installed on this computer; Multron Updater does not install them.
 - Files stored with Git LFS are not supported.
 - Very large repositories (100,000+ files) may return a truncated file list from GitHub.
+
+## Signed self-updates
+
+Multron Updater only installs a new version of itself when it is signed with the Multron Updater release key:
+
+- Every release has an `update.json` with the version and the SHA-256 of `MultronUpdater.exe`, signed with an ECDSA P-256 key (`update.json.sig`). The public key is built into the program (`Services/UpdateKey.cs`).
+- The signature is checked before the program is downloaded, and the downloaded `MultronUpdater.exe` must match its signed SHA-256 before it replaces the running one.
+- The signed version must match the release and be newer than the installed version, so an older release cannot be installed as an update.
+- The update, its manifest and its signature must come from `https://github.com`.
+- The release workflow builds the program without any secrets. A separate job in the protected `release-signing` environment signs exactly that build, adds a GitHub build attestation and publishes the release.
+
+Check a download yourself with `node scripts/verify-update.mjs update.json update.json.sig MultronUpdater.exe`, or `gh attestation verify MultronUpdater.exe --repo Multron-Community/Multron-Updater`. Versions released before signing still update normally to the first signed version; every update after that is verified.
+
+This applies to Multron Updater itself. Targets you add keep their own checks described above (git hashes, `<file>.sha256` files and the SHA-256 GitHub publishes for release files).
+
+**For maintainers:** the key was created with `node scripts/update-keys.mjs`. The private key is the `UPDATE_SIGNING_KEY` secret of the `release-signing` environment and is never committed. Keep an offline backup: installed copies only accept updates signed with this key.

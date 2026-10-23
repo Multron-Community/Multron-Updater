@@ -346,11 +346,14 @@
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBox x:Name="ArgsBox" FontFamily="Cascadia Mono, Consolas"
                                                  ToolTip="Passed to the program when it is started, e.g. --port 8080 --silent"/>
                                         <Button Grid.Column="1" Content="Start now" Margin="8,0,0,0" Click="StartNow_Click"
                                                 ToolTip="Start the program now with these settings (to try them out)"/>
+                                        <Button x:Name="StopNowButton" Grid.Column="2" Content="Close it" Margin="8,0,0,0" Click="StopNow_Click"
+                                                ToolTip="Close the program if it is running (Ctrl+C or close its window, terminated after 5 seconds)"/>
                                     </Grid>
 
                                     <Border x:Name="ConsoleOptions" Background="{DynamicResource SubtleBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
