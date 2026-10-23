@@ -47,6 +47,11 @@ namespace MultronUpdater.Services
 
         public static string ExePath => Environment.ProcessPath ?? "";
 
+        // Files of a multi-file build. The release exe is single-file and does not use
+        // them, so they are moved aside when it replaces a multi-file build.
+        private static readonly string[] MultiFileLeftovers =
+            { "MultronUpdater.dll", "MultronUpdater.deps.json", "MultronUpdater.runtimeconfig.json", "MultronUpdater.pdb" };
+
         public static bool CanUpdateItself(out string reason)
         {
             var path = ExePath;
@@ -54,8 +59,6 @@ namespace MultronUpdater.Services
             { reason = "The program path could not be determined."; return false; }
             if (path.Contains(@"\bin\Debug\", StringComparison.OrdinalIgnoreCase) || path.Contains(@"\bin\Release\", StringComparison.OrdinalIgnoreCase))
             { reason = "This is a development build (running from the bin folder)."; return false; }
-            if (File.Exists(Path.Combine(AppContext.BaseDirectory, "MultronUpdater.dll")))
-            { reason = "This is not a single-file build."; return false; }
             reason = "";
             return true;
         }
@@ -183,6 +186,12 @@ namespace MultronUpdater.Services
                 File.Move(old, exe);
                 throw;
             }
+            foreach (var name in MultiFileLeftovers)
+            {
+                var file = Path.Combine(Path.GetDirectoryName(exe)!, name);
+                try { if (File.Exists(file)) File.Move(file, file + ".old", overwrite: true); }
+                catch (Exception ex) { Logger.Warn($"Could not move {name} aside: {ex.Message}"); }
+            }
             Logger.Success($"Multron Updater {release.Version} installed. Restarting...");
         }
 
@@ -197,14 +206,19 @@ namespace MultronUpdater.Services
 
         public static void CleanupOldVersion()
         {
-            var old = ExePath + ".old";
-            if (!File.Exists(old)) return;
+            var dir = Path.GetDirectoryName(ExePath) ?? "";
+            var olds = MultiFileLeftovers.Select(n => Path.Combine(dir, n + ".old")).Append(ExePath + ".old")
+                .Where(File.Exists).ToList();
+            if (olds.Count == 0) return;
             Task.Run(async () =>
             {
-                for (int i = 0; i < 20; i++)
+                foreach (var old in olds)
                 {
-                    try { File.Delete(old); return; }
-                    catch { await Task.Delay(1000); }
+                    for (int i = 0; i < 20; i++)
+                    {
+                        try { File.Delete(old); break; }
+                        catch { await Task.Delay(1000); }
+                    }
                 }
             });
             try
