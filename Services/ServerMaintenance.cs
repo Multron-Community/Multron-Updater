@@ -129,10 +129,16 @@ namespace MultronUpdater.Services
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return false; }
         }
 
+        /// <summary>How long a started signature reload is followed before giving up on it.</summary>
+        private static readonly TimeSpan ReloadWatchLimit = TimeSpan.FromMinutes(15);
+
         /// <summary>
         /// Asks the running server to reload its signatures and rules from disk
         /// (POST /api/engine/reload; the verdict cache is cleared). When a reload is
-        /// already running, it waits for it and asks again (up to 2 minutes).
+        /// already running, it waits for it and asks again (up to 2 minutes). The
+        /// server answers at once and loads in the background; the reload is then
+        /// followed (GET /api/engine/reload) until it has finished, so the log says
+        /// whether the new signatures are in use.
         /// </summary>
         public static async Task<bool> ReloadSignaturesAsync(UpdateProfile p, CancellationToken ct)
         {
@@ -149,7 +155,7 @@ namespace MultronUpdater.Services
                     if (res.IsSuccessStatusCode)
                     {
                         Logger.Info($"[{name}] Server signature reload started; the server was not restarted.");
-                        return true;
+                        return await WaitForReloadAsync(name, url, ct);
                     }
                     var body = await res.Content.ReadAsStringAsync(ct);
                     if ((int)res.StatusCode == 409 && DateTime.UtcNow - started < TimeSpan.FromMinutes(2))
@@ -166,6 +172,52 @@ namespace MultronUpdater.Services
                     return false;
                 }
             }
+        }
+
+        /// <summary>
+        /// Follows a started reload until the server reports it finished. True when it
+        /// succeeded, or when the server is too old to report it (the reload was
+        /// started; nothing more is known).
+        /// </summary>
+        private static async Task<bool> WaitForReloadAsync(string name, string url, CancellationToken ct)
+        {
+            var started = DateTime.UtcNow;
+            int unreachable = 0;
+            while (DateTime.UtcNow - started < ReloadWatchLimit)
+            {
+                await Task.Delay(2000, ct);
+                try
+                {
+                    using var res = await Http.GetAsync(url, ct);
+                    if ((int)res.StatusCode is 404 or 405)
+                        return true; // older server: no status to follow
+                    res.EnsureSuccessStatusCode();
+                    using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct));
+                    var s = doc.RootElement;
+                    unreachable = 0;
+                    if (s.TryGetProperty("reloading", out var r) && r.ValueKind == JsonValueKind.True)
+                        continue;
+                    var msg = s.TryGetProperty("reloadMsg", out var m) ? m.GetString() ?? "" : "";
+                    if (msg.StartsWith("reload failed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Logger.Warn($"[{name}] The server could not load the new signatures and keeps the old ones ({msg}).");
+                        return false;
+                    }
+                    Logger.Info($"[{name}] Server signatures reloaded ({(msg.Length > 0 ? msg : "done")}, {(DateTime.UtcNow - started).TotalSeconds:0} s).");
+                    return true;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    // A busy server may miss a poll; give up only when it stays unreachable.
+                    if (++unreachable >= 5)
+                    {
+                        Logger.Warn($"[{name}] Lost contact with the server while it reloaded its signatures ({ex.Message}).");
+                        return false;
+                    }
+                }
+            }
+            Logger.Warn($"[{name}] The server was still reloading its signatures after {ReloadWatchLimit.TotalMinutes:0} minutes.");
+            return false;
         }
 
         /// <summary>
