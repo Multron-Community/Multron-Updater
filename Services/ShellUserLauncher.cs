@@ -17,20 +17,19 @@ namespace MultronUpdater.Services
             }
         }
 
-        public static void Start(string exePath, string arguments, string workingDirectory, bool noWindow = false)
+        public static Launched? Start(string exePath, string arguments, string workingDirectory, bool noWindow = false)
         {
             if (!IsElevated)
             {
-                Process.Start(new ProcessStartInfo(exePath, arguments)
+                var p = Process.Start(new ProcessStartInfo(exePath, arguments)
                 {
                     UseShellExecute = !noWindow,
                     CreateNoWindow = noWindow,
                     WorkingDirectory = workingDirectory
-                })?.Dispose();
-                return;
+                });
+                return p == null ? null : new Launched(p);
             }
-            var handle = CreateAsShellUser(exePath, arguments, workingDirectory, noWindow);
-            CloseHandle(handle);
+            return new Launched(CreateAsShellUser(exePath, arguments, workingDirectory, noWindow));
         }
 
         private static IntPtr CreateAsShellUser(string exePath, string arguments, string workingDirectory, bool noWindow)

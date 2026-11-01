@@ -779,7 +779,7 @@ namespace MultronUpdater.Services
                 {
                     try { if (bak != null) File.Copy(bak, local, true); else File.Delete(local); } catch { }
                 }
-                if (exePath != null && wasRunning) ProgramRunner.Start(p, exePath);
+                if (exePath != null && wasRunning) ProgramRunner.Start(p, exePath)?.Dispose();
                 try { Directory.Delete(staging, true); } catch { }
                 throw;
             }
@@ -825,7 +825,15 @@ namespace MultronUpdater.Services
             if (exePath != null && actions.RestartProgram)
             {
                 Report(p, UpdateStage.Starting, $"Starting {Path.GetFileName(exePath)}...");
-                ProgramRunner.Start(p, exePath);
+                using var launched = ProgramRunner.Start(p, exePath);
+                // A program that stops at once (a crash, a startup error) closes its
+                // console window with the message: show it here instead.
+                Report(p, UpdateStage.Starting, $"Checking that {Path.GetFileName(exePath)} keeps running...");
+                if (await ProgramRunner.StoppedRightAwayAsync(launched, StartWatch, ct) is string why)
+                {
+                    Logger.Error($"[{name}] {Path.GetFileName(exePath)} stopped right after it was started: {why}");
+                    throw new InvalidOperationException($"The files were updated, but {Path.GetFileName(exePath)} stopped right after it was started: {why}");
+                }
             }
 
             if (actions.RefreshEdge)
@@ -911,7 +919,7 @@ namespace MultronUpdater.Services
 
             Report(p, UpdateStage.Starting, "Starting the new version next to the running server (seamless update)...");
             var drain = Math.Clamp(p.EffectiveServerDrainSeconds, 0, 300);
-            ProgramRunner.Start(p, exePath, $"--handoff --handoff-drain-secs {drain}");
+            using var launched = ProgramRunner.Start(p, exePath, $"--handoff --handoff-drain-secs {drain}");
             Logger.Info($"[{name}] Seamless update: the running server (pid {oldPid}) keeps scanning while the new version loads.");
 
             var limit = TimeSpan.FromMinutes(Math.Clamp(p.ServerSeamlessMinutes, 1, 180));
@@ -931,8 +939,9 @@ namespace MultronUpdater.Services
                     downSince ??= now;
                     if (now - downSince.Value > TimeSpan.FromSeconds(90))
                     {
-                        Logger.Warn($"[{name}] No server answers 90 s after the switch; starting it the usual way.");
-                        ProgramRunner.Start(p, exePath);
+                        Logger.Warn($"[{name}] No server answers 90 s after the switch; starting it the usual way." +
+                                    (launched?.HasExited == true ? $" The new version stopped: {ProgramRunner.StopReason(launched)}" : ""));
+                        ProgramRunner.Start(p, exePath)?.Dispose();
                         break;
                     }
                     continue;
@@ -949,11 +958,12 @@ namespace MultronUpdater.Services
                     sawStandby = true;
                     standbyPid = sp;
                 }
-                else if (st.Mode != "switching" && (sawStandby || now - started > TimeSpan.FromSeconds(120)))
+                else if (st.Mode != "switching" && (sawStandby || launched?.HasExited == true || now - started > TimeSpan.FromSeconds(120)))
                 {
+                    var why = launched?.HasExited == true ? ProgramRunner.StopReason(launched) : "see its console log";
                     failure = sawStandby
-                        ? "the new version stopped before it took over (see its console log)"
-                        : "the new version did not start (see its console log)";
+                        ? $"the new version stopped before it took over ({why})"
+                        : $"the new version did not start ({why})";
                     break;
                 }
                 if (now - started > limit)
@@ -1157,6 +1167,9 @@ namespace MultronUpdater.Services
             while (v >= 1024 && u < units.Length - 1) { v /= 1024; u++; }
             return u == 0 ? $"{bytes} B" : $"{v:0.0} {units[u]}";
         }
+
+        /// <summary>How long a restarted program is watched for stopping at once.</summary>
+        private static readonly TimeSpan StartWatch = TimeSpan.FromSeconds(30);
 
         private void Report(UpdateProfile p, UpdateStage stage, string message, int fileIndex = 0, int fileCount = 0,
                             long bytesDone = 0, long bytesTotal = 0, string currentFile = "") =>

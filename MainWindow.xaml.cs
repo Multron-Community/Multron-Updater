@@ -807,7 +807,7 @@ namespace MultronUpdater
             };
         }
 
-        private void StartNow_Click(object sender, RoutedEventArgs e)
+        private async void StartNow_Click(object sender, RoutedEventArgs e)
         {
             if (_current == null) return;
             _autoSave.Stop();
@@ -815,8 +815,14 @@ namespace MultronUpdater
             var exe = ProgramRunner.ExePath(_current);
             if (exe == null) { ShowWarning("Choose the target folder and the program (.exe) first."); return; }
             if (!File.Exists(exe)) { ShowWarning($"The program does not exist yet:\n{exe}"); return; }
-            ProgramRunner.Start(_current, exe);
+            var profile = _current;
+            using var launched = ProgramRunner.Start(profile, exe);
             SetStatus($"Started {Path.GetFileName(exe)}", null);
+            if (await ProgramRunner.StoppedRightAwayAsync(launched, TimeSpan.FromSeconds(30)) is string why)
+            {
+                Logger.Error($"[{profile.DisplayName}] {Path.GetFileName(exe)} stopped right after it was started: {why}");
+                ShowWarning($"{Path.GetFileName(exe)} stopped right after it was started:\n\n{why}");
+            }
         }
 
         private async void StopNow_Click(object sender, RoutedEventArgs e)
