@@ -75,7 +75,8 @@ namespace MultronUpdater.Services
             if (!File.Exists(exePath)) { Logger.Warn($"[{name}] Cannot start, file not found: {exePath}"); return null; }
             var dir = Path.GetDirectoryName(exePath)!;
             var args = ((p.StartArguments?.Trim() ?? "") + " " + extraArgs).Trim();
-            var asUser = p.StartWithoutAdmin && ShellUserLauncher.IsElevated ? " as a normal user (without administrator rights)" : "";
+            var asUser = p.StartAsAdmin ? " as administrator"
+                : ShellUserLauncher.IsElevated ? " as a normal user (without administrator rights)" : "";
             try
             {
                 Launched? l;
@@ -208,13 +209,24 @@ namespace MultronUpdater.Services
 
         private static string ComSpec => Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
 
+        /// <summary>
+        /// As the signed-in user without administrator rights, even though Multron Updater
+        /// itself runs as administrator: the programs it starts (Multron server) need no
+        /// elevation. With <see cref="UpdateProfile.StartAsAdmin"/> it is started as
+        /// administrator instead, still as a plain child process (no Windows service):
+        /// it inherits the updater's elevation, so Windows asks nothing.
+        /// </summary>
         private static Launched? Launch(UpdateProfile p, string file, string args, string dir, bool noWindow)
         {
-            if (p.StartWithoutAdmin) return ShellUserLauncher.Start(file, args, dir, noWindow);
+            if (!p.StartAsAdmin) return ShellUserLauncher.Start(file, args, dir, noWindow);
+            var elevated = ShellUserLauncher.IsElevated;
             var proc = Process.Start(new ProcessStartInfo(file, args)
             {
-                UseShellExecute = !noWindow,
+                // Only a not elevated updater (started without its manifest) has to ask Windows.
+                UseShellExecute = !noWindow || !elevated,
+                Verb = elevated ? "" : "runas",
                 CreateNoWindow = noWindow,
+                WindowStyle = noWindow ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal,
                 WorkingDirectory = dir
             });
             return proc == null ? null : new Launched(proc);

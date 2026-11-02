@@ -116,7 +116,7 @@ namespace MultronUpdater
             GlobalServerUrlBox.TextChanged += (_, _) => UpdateServerMaintUi();
             GlobalDrainBox.TextChanged += (_, _) => UpdateServerMaintUi();
             DevOptionsCheck.Click += (_, _) => { ScheduleAutoSave(); UpdateServerMaintUi(); };
-            NoAdminCheck.Click += (_, _) => ScheduleAutoSave();
+            AdminCheck.Click += (_, _) => ScheduleAutoSave();
             ArgsBox.TextChanged += (_, _) => ScheduleAutoSave();
             AssetBox.TextChanged += (_, _) => { ScheduleAutoSave(); UpdateSourceUi(); };
             ExeBox.TextChanged += (_, _) => UpdateSourceUi();
@@ -209,7 +209,7 @@ namespace MultronUpdater
                 LocalRepoBox.Text = p.LocalRepoFolder;
                 AssetBox.Text = p.ReleaseAsset;
                 ExtractZipCheck.IsChecked = p.ExtractZipAssets;
-                NoAdminCheck.IsChecked = p.StartWithoutAdmin;
+                AdminCheck.IsChecked = p.StartAsAdmin;
                 ReleaseInfoText.Text = p.InstalledReleaseFiles.Count > 0 ? $"Installed release: {p.InstalledReleaseTag}" : "";
                 ReleaseAssetList.ItemsSource = null;
                 UpdateSourceUi();
@@ -265,7 +265,7 @@ namespace MultronUpdater
             p.LocalRepoFolder = LocalRepoBox.Text.Trim();
             p.ReleaseAsset = AssetBox.Text.Trim();
             p.ExtractZipAssets = ExtractZipCheck.IsChecked == true;
-            p.StartWithoutAdmin = NoAdminCheck.IsChecked == true;
+            p.StartAsAdmin = AdminCheck.IsChecked == true;
             p.IsConsoleApp = ConsoleAppRadio.IsChecked == true;
             p.StartArguments = ArgsBox.Text.Trim();
             p.HideConsole = ConsoleHiddenRadio.IsChecked == true;
