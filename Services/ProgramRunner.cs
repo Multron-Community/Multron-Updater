@@ -74,7 +74,7 @@ namespace MultronUpdater.Services
             var name = p.DisplayName;
             if (!File.Exists(exePath)) { Logger.Warn($"[{name}] Cannot start, file not found: {exePath}"); return null; }
             var dir = Path.GetDirectoryName(exePath)!;
-            var args = ((p.StartArguments?.Trim() ?? "") + " " + extraArgs).Trim();
+            var args = (WithoutProgramName(p.StartArguments, exePath) + " " + extraArgs).Trim();
             var asUser = p.StartAsAdmin ? " as administrator"
                 : ShellUserLauncher.IsElevated ? " as a normal user (without administrator rights)" : "";
             try
@@ -341,6 +341,24 @@ namespace MultronUpdater.Services
                 return path == null || string.Equals(Path.GetFullPath(path), Path.GetFullPath(exePath), StringComparison.OrdinalIgnoreCase);
             }
             catch { return true; }
+        }
+
+        /// <summary>
+        /// The start arguments without a leading program name: a whole command line pasted
+        /// into the field ("multron_server.exe --x") would otherwise pass the program's own
+        /// name as its first argument, which a strict parser rejects (multron_server exits 2).
+        /// </summary>
+        private static string WithoutProgramName(string? startArguments, string exePath)
+        {
+            var args = startArguments?.Trim() ?? "";
+            var first = args.StartsWith('"') ? args.IndexOf('"', 1) is var q and > 0 ? args[..(q + 1)] : args
+                : args.Split(' ', 2)[0];
+            var token = first.Trim('"');
+            if (token.Length == 0) return args;
+            var isSelf = token.Equals(Path.GetFileName(exePath), StringComparison.OrdinalIgnoreCase)
+                || token.Equals(Path.GetFileNameWithoutExtension(exePath), StringComparison.OrdinalIgnoreCase)
+                || token.Equals(exePath, StringComparison.OrdinalIgnoreCase);
+            return isSelf ? args[first.Length..].Trim() : args;
         }
 
         private static string ArgsText(string args) => args.Length > 0 ? $" with arguments \"{args}\"" : "";
