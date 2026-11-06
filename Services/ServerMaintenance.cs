@@ -75,6 +75,7 @@ namespace MultronUpdater.Services
             var limit = TimeSpan.FromSeconds(Math.Clamp(p.EffectiveServerDrainSeconds, 0, 600));
             var started = DateTime.UtcNow;
             int active = -1;
+            bool busyLogged = false;
             while (DateTime.UtcNow - started < limit)
             {
                 try
@@ -82,8 +83,20 @@ namespace MultronUpdater.Services
                     var status = await GetStatusAsync(baseUrl, ct);
                     active = status.TryGetProperty("activeWork", out var a) ? a.GetInt32() : 0;
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
+                    // Request timed out: the server is up but busy (likely scanning), so keep
+                    // waiting until the limit instead of closing it now.
+                    if (!busyLogged)
+                        Logger.Info($"[{name}] The server is slow to answer (busy); still waiting for scans to finish.");
+                    busyLogged = true;
+                    active = Math.Max(active, 1);
+                    await Task.Delay(1000, ct);
+                    continue;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Not reachable any more (closed or crashed): nothing left to wait for.
                     active = -1;
                     break;
                 }

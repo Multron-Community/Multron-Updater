@@ -918,7 +918,7 @@ namespace MultronUpdater.Services
             try { Directory.Delete(staging, true); } catch { }
 
             Report(p, UpdateStage.Starting, "Starting the new version next to the running server (seamless update)...");
-            var drain = Math.Clamp(p.EffectiveServerDrainSeconds, 0, 300);
+            var drain = Math.Clamp(p.EffectiveServerDrainSeconds, 0, 600);
             using var launched = ProgramRunner.Start(p, exePath, $"--handoff --handoff-drain-secs {drain}");
             Logger.Info($"[{name}] Seamless update: the running server (pid {oldPid}) keeps scanning while the new version loads.");
 
