@@ -95,6 +95,12 @@ namespace MultronUpdater.Services
         public bool RestartAfterUpdate { get; set; } = true;
         public bool RefreshEdgeAfterUpdate { get; set; } = false;
         public bool KeepBackup { get; set; } = true;
+        /// <summary>
+        /// When an update fails (a file cannot be replaced, or a seamless update's new
+        /// version does not take over), leave the new files in place instead of putting
+        /// the previous ones back. Off by default: a failed update restores the old files.
+        /// </summary>
+        public bool KeepFilesOnFailure { get; set; } = false;
 
         /// <summary>Multron cloud scan server: switch it to "updating server" maintenance before closing it.</summary>
         public bool ServerMaintenance { get; set; } = false;

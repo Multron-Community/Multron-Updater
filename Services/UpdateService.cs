@@ -774,10 +774,17 @@ namespace MultronUpdater.Services
             }
             catch (Exception ex)
             {
-                Logger.Error($"[{name}] Replacing files failed, rolling back to the previous version: " + ex.Message);
-                foreach (var (local, bak) in replaced)
+                if (p.KeepFilesOnFailure)
                 {
-                    try { if (bak != null) File.Copy(bak, local, true); else File.Delete(local); } catch { }
+                    Logger.Error($"[{name}] Replacing files failed after {replaced.Count} of {files.Count} file(s); the new files are kept (no rollback): " + ex.Message);
+                }
+                else
+                {
+                    Logger.Error($"[{name}] Replacing files failed, rolling back to the previous version: " + ex.Message);
+                    foreach (var (local, bak) in replaced)
+                    {
+                        try { if (bak != null) File.Copy(bak, local, true); else File.Delete(local); } catch { }
+                    }
                 }
                 if (exePath != null && wasRunning) ProgramRunner.Start(p, exePath)?.Dispose();
                 try { Directory.Delete(staging, true); } catch { }
@@ -911,8 +918,15 @@ namespace MultronUpdater.Services
             }
             catch (Exception ex)
             {
-                Logger.Error($"[{name}] Replacing files failed, rolling back; the server keeps running: " + ex.Message);
-                Rollback();
+                if (p.KeepFilesOnFailure)
+                {
+                    Logger.Error($"[{name}] Replacing files failed; the new files are kept (no rollback) and the server keeps running: " + ex.Message);
+                }
+                else
+                {
+                    Logger.Error($"[{name}] Replacing files failed, rolling back; the server keeps running: " + ex.Message);
+                    Rollback();
+                }
                 throw;
             }
             try { Directory.Delete(staging, true); } catch { }
@@ -976,6 +990,11 @@ namespace MultronUpdater.Services
 
             if (failure != null)
             {
+                if (p.KeepFilesOnFailure)
+                {
+                    // The running server keeps its (renamed) files; the next start uses the new ones.
+                    throw new InvalidOperationException($"Seamless update failed: {failure}. The new files were kept (no rollback); the running server was left as it was and the new version is used the next time it starts.");
+                }
                 Rollback();
                 throw new InvalidOperationException($"Seamless update failed: {failure}. The previous files were put back and the running server was left as it was.");
             }

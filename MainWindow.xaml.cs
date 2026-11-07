@@ -72,7 +72,7 @@ namespace MultronUpdater
                                         GlobalServerUrlBox, GlobalDrainBox })
                 box.TextChanged += (_, _) => ScheduleAutoSave();
             TokenBox.PasswordChanged += (_, _) => ScheduleAutoSave();
-            foreach (var check in new[] { EnabledCheck, RestartCheck, EdgeCheck, BackupCheck, OnlyFilesCheck, NotifyCheck, MinimizedCheck, StartupCheck, SelfUpdateCheck })
+            foreach (var check in new[] { EnabledCheck, RestartCheck, EdgeCheck, BackupCheck, KeepFilesOnFailureCheck, OnlyFilesCheck, NotifyCheck, MinimizedCheck, StartupCheck, SelfUpdateCheck })
                 check.Click += (_, _) => ScheduleAutoSave();
             foreach (var radio in new[] { WindowsAppRadio, ConsoleAppRadio, ConsoleShowRadio, ConsoleKeepRadio, ConsoleHiddenRadio,
                                           SourceBothRadio, SourceRepoRadio, SourceReleasesRadio, SourceLocalRadio })
@@ -216,6 +216,7 @@ namespace MultronUpdater
                 RestartCheck.IsChecked = p.RestartAfterUpdate;
                 EdgeCheck.IsChecked = p.RefreshEdgeAfterUpdate;
                 BackupCheck.IsChecked = p.KeepBackup;
+                KeepFilesOnFailureCheck.IsChecked = p.KeepFilesOnFailure;
                 ServerMaintCheck.IsChecked = p.ServerMaintenance;
                 ServerReloadCheck.IsChecked = p.ServerReloadSignatures;
                 ServerSeamlessCheck.IsChecked = p.ServerSeamlessUpdate;
@@ -273,6 +274,7 @@ namespace MultronUpdater
             p.RestartAfterUpdate = RestartCheck.IsChecked == true;
             p.RefreshEdgeAfterUpdate = EdgeCheck.IsChecked == true;
             p.KeepBackup = BackupCheck.IsChecked == true;
+            p.KeepFilesOnFailure = KeepFilesOnFailureCheck.IsChecked == true;
             p.ServerMaintenance = ServerMaintCheck.IsChecked == true;
             p.ServerReloadSignatures = ServerReloadCheck.IsChecked == true;
             p.ServerSeamlessUpdate = ServerSeamlessCheck.IsChecked == true;

@@ -404,6 +404,8 @@
                                     </StackPanel>
 
                                     <CheckBox x:Name="BackupCheck" Content="Keep a backup of replaced files (last 3 updates)" Margin="0,10,0,0"/>
+                                    <CheckBox x:Name="KeepFilesOnFailureCheck" Content="Do not put the previous files back when an update fails" Margin="0,6,0,0"
+                                              ToolTip="When a file cannot be replaced, or a seamless update's new version does not take over, the new files stay in place instead of being rolled back. The error is still reported."/>
                                 </StackPanel>
                             </Border>
 
