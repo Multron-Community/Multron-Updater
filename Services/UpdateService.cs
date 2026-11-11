@@ -953,9 +953,8 @@ namespace MultronUpdater.Services
                     downSince ??= now;
                     if (now - downSince.Value > TimeSpan.FromSeconds(90))
                     {
-                        Logger.Warn($"[{name}] No server answers 90 s after the switch; starting it the usual way." +
+                        Logger.Warn($"[{name}] No server answers 90 s after the switch." +
                                     (launched?.HasExited == true ? $" The new version stopped: {ProgramRunner.StopReason(launched)}" : ""));
-                        ProgramRunner.Start(p, exePath)?.Dispose();
                         break;
                     }
                     continue;
@@ -964,6 +963,18 @@ namespace MultronUpdater.Services
                 if (st.Pid != oldPid)
                 {
                     Logger.Info($"[{name}] Seamless update done: the new version (pid {st.Pid}) took over from pid {oldPid}.");
+                    if (oldPid != 0)
+                    {
+                        try
+                        {
+                            var oldProc = System.Diagnostics.Process.GetProcessById(oldPid);
+                            if (!oldProc.HasExited)
+                            {
+                                try { oldProc.Kill(entireProcessTree: true); } catch { }
+                            }
+                        }
+                        catch { }
+                    }
                     break;
                 }
                 if (st.StandbyPid is int sp)
