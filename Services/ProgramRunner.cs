@@ -250,6 +250,28 @@ namespace MultronUpdater.Services
             return Launch(p, ComSpec, command, dir, noWindow: true);
         }
 
+        public static bool IsRunning(UpdateProfile profile, string? exePath)
+        {
+            if (HasWildcard(profile.ExeName))
+                return MatchingExePaths(profile).Any(IsExeRunning);
+            return exePath != null && IsExeRunning(exePath);
+        }
+
+        private static bool IsExeRunning(string exePath)
+        {
+            var name = Path.GetFileNameWithoutExtension(exePath);
+            if (string.IsNullOrEmpty(name)) return false;
+            var procs = Process.GetProcessesByName(name);
+            try
+            {
+                return procs.Any(p => p.Id != Environment.ProcessId && !HasExited(p) && IsSameExe(p, exePath));
+            }
+            finally
+            {
+                foreach (var p in procs) p.Dispose();
+            }
+        }
+
         public static async Task<bool> CloseAsync(UpdateProfile profile, string exePath)
         {
             var profileName = profile.DisplayName;

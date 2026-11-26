@@ -691,26 +691,57 @@ namespace MultronUpdater.Services
         private static bool IsProgramFile(string path) =>
             path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
 
-        private async Task InstallStagedAsync(UpdateProfile p, List<StagedFile> files, AfterActions actions, string staging, CancellationToken ct, bool allowReload = true)
+        /// <summary>JSON data/config files that can be replaced in place without closing the running program.</summary>
+        private static bool IsJsonFile(string path) =>
+            path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsJsonConfigOnly(string path) =>
+            path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+
+        private async Task InstallStagedAsync(UpdateProfile p, List<StagedFile> files, AfterActions actions, string staging, CancellationToken ct, bool allowReload = true, bool allowSeamless = true)
         {
             var name = p.DisplayName;
             string? exePath = ProgramRunner.ExePath(p);
             bool wasRunning = false;
             var requested = actions;
 
-            // Multron server, no .exe / .dll changed: replace the files while it runs and
-            // reload its signatures instead of closing and restarting it.
-            bool reloadOnly = allowReload && p.ServerReloadSignatures && exePath != null && actions.CloseProgram &&
-                              !files.Any(f => IsProgramFile(f.LocalPath)) && await ServerMaintenance.IsRunningAsync(p, ct);
-            if (reloadOnly)
+            bool jsonOnly = files.Count > 0 && files.All(f => IsJsonFile(f.LocalPath));
+            bool jsonConfigOnly = jsonOnly && files.All(f => IsJsonConfigOnly(f.LocalPath));
+            bool reloadOnly = false;
+            bool triggerSignatureReload = false;
+
+            if (jsonOnly)
             {
-                Logger.Info($"[{name}] No program files changed ({files.Count} file(s)); the server keeps running and reloads its signatures.");
+                Logger.Info($"[{name}] Only JSON file(s) changed ({files.Count} file(s)); replacing in place without closing or restarting {(exePath != null ? Path.GetFileName(exePath) : "the program")}.");
                 actions = actions with { CloseProgram = false, RestartProgram = false };
+                // Plain .json config files (e.g. multron_server.json) do not need an engine signature reload;
+                // .jsonl signature feeds (e.g. tlsh_blacklist.jsonl) still trigger a hot signature reload when enabled.
+                if (!jsonConfigOnly && p.ServerReloadSignatures && exePath != null &&
+                    (await ServerMaintenance.IsRunningAsync(p, ct) || ProgramRunner.IsRunning(p, exePath)))
+                {
+                    triggerSignatureReload = true;
+                }
+            }
+            else
+            {
+                // Multron server, no .exe / .dll changed: replace the files while it runs and
+                // reload its signatures instead of closing and restarting it. Also check local
+                // process presence so a temporarily slow/busy dashboard probe never hard-closes it.
+                reloadOnly = allowReload && p.ServerReloadSignatures && exePath != null && actions.CloseProgram &&
+                             !files.Any(f => IsProgramFile(f.LocalPath)) &&
+                             (await ServerMaintenance.IsRunningAsync(p, ct) || ProgramRunner.IsRunning(p, exePath));
+                if (reloadOnly)
+                {
+                    Logger.Info($"[{name}] No program files changed ({files.Count} file(s)); the server keeps running and reloads its signatures.");
+                    actions = actions with { CloseProgram = false, RestartProgram = false };
+                    triggerSignatureReload = true;
+                }
             }
 
             // Multron server, seamless update: the new version starts next to the running
             // one and takes over when it has loaded; scans are not stopped meanwhile.
-            if (!reloadOnly && allowReload && p.ServerSeamlessUpdate && exePath != null && actions.CloseProgram && actions.RestartProgram)
+            if (!jsonOnly && !reloadOnly && allowSeamless && p.ServerSeamlessUpdate && exePath != null && actions.CloseProgram && actions.RestartProgram)
             {
                 var status = await ServerMaintenance.GetServerStatusAsync(p, ct);
                 if (status is { Seamless: true })
@@ -760,16 +791,16 @@ namespace MultronUpdater.Services
                 }
                 Logger.Info($"[{name}] {replaced.Count} file(s) replaced in {p.LocalFolder}.");
             }
-            catch (Exception ex) when (reloadOnly && ex is not OperationCanceledException)
+            catch (Exception ex) when (reloadOnly && !jsonOnly && ex is not OperationCanceledException)
             {
                 // A file is held open by the running server: put the old files back and
-                // update the usual way (close, replace, start).
-                Logger.Warn($"[{name}] Replacing files while the server runs failed ({ex.Message}); closing it for the update instead.");
+                // fall back to a seamless update first (only closing if seamless is unavailable).
+                Logger.Warn($"[{name}] Replacing files while the server runs failed ({ex.Message}); trying full update flow instead.");
                 foreach (var (local, bak) in replaced)
                 {
                     try { if (bak != null) File.Copy(bak, local, true); else File.Delete(local); } catch { }
                 }
-                await InstallStagedAsync(p, files, requested, staging, ct, allowReload: false);
+                await InstallStagedAsync(p, files, requested, staging, ct, allowReload: false, allowSeamless: true);
                 return;
             }
             catch (Exception ex)
@@ -823,7 +854,7 @@ namespace MultronUpdater.Services
                 CleanupOldBackups(Path.Combine(AppSettings.DataFolder, "backups", p.Id), keep: 3);
             }
 
-            if (reloadOnly)
+            if (triggerSignatureReload)
             {
                 Report(p, UpdateStage.Starting, "Reloading the server's signatures...");
                 await ServerMaintenance.ReloadSignaturesAsync(p, ct);
